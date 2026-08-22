@@ -1,0 +1,29 @@
+# ── Secrets — never commit these ─────────────────────────────────────────────
+backend/secrets/*
+!backend/secrets/*.example.json
+.env
+*.env
+.env.*
+
+# ── Runtime data (personal run history, regenerated on first check) ─────────
+backend/data/*
+!backend/data/.gitkeep
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# ── Node / frontend ───────────────────────────────────────────────────────────
+node_modules/
+frontend/build/
+frontend/.env*
+npm-debug.log*
+
+# ── OS / editor cruft ─────────────────────────────────────────────────────────
+.DS_Store
+.vscode/
+.idea/
+venv/

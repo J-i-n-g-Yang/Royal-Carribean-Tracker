@@ -1,0 +1,32 @@
+services:
+  backend:
+    build: ./backend
+    container_name: rc-price-backend
+    ports:
+      - "5050:5000"
+    environment:
+      # Set to "0" to try curl_cffi's TLS impersonation again (more bot-detection
+      # resistant, but was timing out in this Docker Desktop setup — see the
+      # troubleshooting notes in README.md). "1" uses plain requests instead.
+      - RC_FORCE_PLAIN_REQUESTS=1
+      # Optional automatic scheduled checks (see backend/secrets/README.md).
+      # 0 = disabled (default). Set to e.g. 360 to check every 6 hours.
+      - RC_SCHEDULE_INTERVAL_MINUTES=0
+    volumes:
+      # Persists run history across container restarts.
+      - ./backend/data:/app/data
+      # Mounted read-only: only used by the optional scheduler above, never
+      # by manual UI checks. See backend/secrets/accounts.example.json.
+      - ./backend/secrets:/app/secrets:ro
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    container_name: rc-dashboard-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - REACT_APP_API_URL=http://localhost:5050
+    depends_on:
+      - backend
+    restart: unless-stopped
