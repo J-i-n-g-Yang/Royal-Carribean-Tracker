@@ -95,6 +95,18 @@ def main() -> int:
         # but keep this generic rather than printing exception internals.
         print("Check completed with an error — see notifications/history for details.", file=sys.stderr)
 
+    # Send a general run summary (current bookings + any savings found),
+    # independent of the engine's own price-drop-only alerts, so a scheduled
+    # run gives you confirmation it ran even when nothing changed. Opt out
+    # with RC_RUN_SUMMARY=0 if you only want alerts on actual price drops.
+    if os.environ.get("RC_RUN_SUMMARY", "1") != "0":
+        with contextlib.redirect_stdout(engine_output):
+            summary_result = check_runner.send_run_summary(result)
+        if summary_result.get("sent"):
+            print("Run summary notification sent.")
+        else:
+            print(f"Run summary notification not sent: {summary_result.get('error')}", file=sys.stderr)
+
     return 0 if result.get("success") else 1
 
 

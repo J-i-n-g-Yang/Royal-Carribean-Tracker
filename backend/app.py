@@ -94,6 +94,31 @@ def notify_test():
     return jsonify(result), status_code
 
 
+@app.route("/api/notify/summary", methods=["POST"])
+def notify_summary():
+    """
+    Sends an unconditional "here's the state of your bookings" notification
+    for a completed run — defaults to the most recent run if no run_id is
+    given. Independent of the engine's own price-drop-only alerts.
+    """
+    payload = request.get_json(force=True, silent=True) or {}
+    run_id = payload.get("run_id")
+
+    if run_id is not None:
+        record = history_store.get_run(int(run_id))
+        if record is None:
+            return jsonify({"success": False, "error": f"Run {run_id} not found."}), 404
+    else:
+        recent = history_store.get_history(limit=1)
+        if not recent:
+            return jsonify({"success": False, "error": "No runs in history yet."}), 404
+        record = recent[0]
+
+    result = check_runner.send_run_summary(record, payload.get("notify_urls"))
+    status_code = 200 if result["success"] else 500
+    return jsonify(result), status_code
+
+
 # ── Run history ───────────────────────────────────────────────────────────────
 
 @app.route("/api/history", methods=["GET"])

@@ -227,6 +227,8 @@ export default function PriceChecker({ dark }) {
   const [notifyUrl, setNotifyUrl] = useState('');
   const [testingNotify, setTestingNotify] = useState(false);
   const [notifyTestResult, setNotifyTestResult] = useState(null);
+  const [sendingSummary, setSendingSummary] = useState(false);
+  const [summarySentMsg, setSummarySentMsg] = useState(null);
 
   // Diagnostic snapshot from GET /api/notify/status — surfaces things like a
   // malformed backend/secrets/notify.json that would otherwise fail silently
@@ -262,6 +264,24 @@ export default function PriceChecker({ dark }) {
     } finally {
       setTestingNotify(false);
       fetchNotifyStatus(); // in case the test round-trip revealed something new
+    }
+  };
+
+  const sendRunSummary = async () => {
+    setSendingSummary(true);
+    setSummarySentMsg(null);
+    try {
+      const res = await fetch(`${API_URL}/api/notify/summary`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(result?.run_id ? { run_id: result.run_id } : {}),
+      });
+      const data = await res.json();
+      setSummarySentMsg(data.sent ? 'Summary sent!' : (data.error || 'Failed to send.'));
+    } catch (err) {
+      setSummarySentMsg(err.message);
+    } finally {
+      setSendingSummary(false);
     }
   };
 
@@ -501,9 +521,22 @@ export default function PriceChecker({ dark }) {
           {result.notifications_enabled !== undefined && (
             <div className={`flex items-center gap-2 text-xs rc-no-print ${d('text-gray-500', 'text-gray-400')}`}>
               <Mail className="w-3.5 h-3.5" />
-              {result.notifications_enabled
-                ? 'Notifications are configured — you\'ll be alerted via Apprise for any price drops found.'
-                : 'Notifications not configured — see the diagnostics above the "Run Price Check" button.'}
+              <span>
+                {result.notifications_enabled
+                  ? 'Notifications are configured — you\'ll be alerted via Apprise for any price drops found.'
+                  : 'Notifications not configured — see the diagnostics above the "Run Price Check" button.'}
+              </span>
+              {result.notifications_enabled && (
+                <button
+                  onClick={sendRunSummary}
+                  disabled={sendingSummary}
+                  className={`flex items-center gap-1 px-2 py-0.5 rounded font-semibold ${d('bg-gray-100 text-gray-700 hover:bg-gray-200', 'bg-gray-800 text-gray-200 hover:bg-gray-700')} disabled:opacity-50`}
+                >
+                  {sendingSummary ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
+                  Email me this summary
+                </button>
+              )}
+              {summarySentMsg && <span>— {summarySentMsg}</span>}
             </div>
           )}
 

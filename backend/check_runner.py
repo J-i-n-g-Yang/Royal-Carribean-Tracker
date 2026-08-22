@@ -222,6 +222,99 @@ def send_test_notification(payload_override: Optional[List[str]]) -> Dict[str, A
     }
 
 
+# ── Run summary notification ────────────────────────────────────────────────
+#
+# The engine's own config.apobj.notify(...) calls are deliberately narrow —
+# they only fire on an actionable event (cabin price drop, addon price drop,
+# room no longer available). That's the right default for "don't spam me
+# every run," but it means a scheduled/unattended run is silent when nothing
+# changed, which gives you no confirmation it actually ran at all. This
+# builds and sends a separate, unconditional "here's the state of your
+# bookings" notification — current fare/OBC/check-in status per reservation,
+# plus whatever savings were found — independent of the engine's own alerts.
+
+def _format_run_summary(result: Dict[str, Any]) -> str:
+    """Plain-text summary of one completed run, for a general status notification."""
+    findings = result.get("findings") or {}
+    reservations = findings.get("reservations") or []
+    summary = result.get("summary") or {}
+
+    lines: List[str] = []
+
+    if not result.get("success"):
+        lines.append(f"Run failed: {result.get('error') or 'see logs for details'}")
+        lines.append("")
+
+    if not reservations:
+        lines.append("No reservations found in this run.")
+    else:
+        lines.append(f"{len(reservations)} reservation(s) checked:")
+        for r in reservations:
+            fare = r.get("cruise_fare_total")
+            fare_str = f"${fare:,.2f}" if isinstance(fare, (int, float)) else "unknown"
+
+            obc = r.get("onboard_credit")
+            obc_str = ""
+            if isinstance(obc, (int, float)) and obc:
+                obc_str = f", OBC ${obc:,.2f} {r.get('onboard_credit_currency') or ''}".rstrip()
+
+            checkin = r.get("checkin_opens")
+            checkin_str = f", check-in opens {checkin}" if checkin else ""
+
+            lines.append(
+                f"- Reservation #{r.get('reservation_id')}: "
+                f"{r.get('ship') or 'unknown ship'} ({r.get('sail_date') or 'unknown date'}), "
+                f"room {r.get('room') or 'unknown'}, fare {fare_str}{obc_str}{checkin_str}"
+            )
+
+    hit_count = summary.get("hit_count", 0)
+    total_cabin_savings = summary.get("total_cabin_savings", 0)
+    lines.append("")
+    if not result.get("success"):
+        pass  # already reported the failure above; no savings verdict to give
+    elif hit_count:
+        lines.append(
+            f"{hit_count} savings opportunity(ies) found this run "
+            f"(${total_cabin_savings:,.2f} total cabin savings) — see the dashboard for details."
+        )
+    else:
+        lines.append("No price drops found this run — everything is at your best known price.")
+
+    return "\n".join(lines)
+
+
+def send_run_summary(result: Dict[str, Any], payload_override: Optional[List[str]] = None) -> Dict[str, Any]:
+    """
+    Fires an unconditional run-summary notification to every configured
+    Apprise URL. Unlike send_test_notification(), the body reflects a real
+    completed run (result must be a dict shaped like run_check()'s return
+    value / a history_store record) rather than a fixed test message.
+    """
+    urls = _resolve_notify_urls(payload_override)
+    if not urls:
+        return {"success": False, "error": "No notification URLs configured.", "sent": False}
+
+    apobj = _build_apprise_object(urls)
+    if apobj is None:
+        return {"success": False, "error": "No valid notification URLs to send to.", "sent": False}
+
+    body = _format_run_summary(result)
+    try:
+        sent = apobj.notify(
+            body=body,
+            title="Cruise Price Check — Run Summary",
+            body_format=engine.NotifyFormat.TEXT,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return {"success": False, "error": str(exc), "sent": False}
+
+    return {
+        "success": bool(sent),
+        "error": None if sent else "Notify call returned failure — check credentials/chat id.",
+        "sent": bool(sent),
+    }
+
+
 def _json_safe_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
     engine.checkin_payment_rows stores "final_payment" as a real date object
@@ -557,7 +650,8 @@ def run_check(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     # Persist to run history (passwords already stripped from result)
     usernames = [a.get("username", "") for a in payload.get("accounts", [])]
-    history_store.append_run(result, usernames)
+    record = history_store.append_run(result, usernames)
+    result["run_id"] = record.get("run_id")
 
     return result
 
