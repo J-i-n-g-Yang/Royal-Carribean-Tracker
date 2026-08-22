@@ -1,7 +1,7 @@
-flask
-flask-cors
-requests
-PyYAML
-Apprise
-curl_cffi
-APScheduler
+flask>=2.3.0
+flask-cors>=4.0.0
+requests>=2.31.0
+PyYAML>=6.0
+apprise>=1.7.0
+curl_cffi>=0.6.0
+APScheduler>=3.10.0

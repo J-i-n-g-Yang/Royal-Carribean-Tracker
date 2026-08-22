@@ -15,7 +15,7 @@ Royal-Carribean-Tracker/
 ├── README.md                   # This file
 ├── .github/
 │   └── workflows/
-│       ├── deploy.yml          # Deploys frontend to GitHub Pages on push to master
+│       ├── deploy.yml          # Deploys frontend to GitHub Pages (main → production, other branches → preview)
 │       └── scheduled-check.yml # Runs daily price check via GitHub Actions (no server needed)
 │
 ├── backend/
@@ -83,13 +83,15 @@ The frontend's "Price Checker" tab calls the backend at `http://localhost:5050` 
 Two automated workflows live in `.github/workflows/`:
 
 ### `deploy.yml` — Frontend deployment
-Triggers on every push to `master` that touches `frontend/`, and deploys the React app to GitHub Pages.
+Triggers on every push to any branch. Behaviour depends on the branch:
+
+- **`main`** → builds and deploys to the root of the `gh-pages` branch → live at https://J-i-n-g-Yang.github.io/Royal-Carribean-Tracker
+- **Any other branch** → builds and deploys to a preview subfolder, with the URL posted as a commit status on GitHub → `https://J-i-n-g-Yang.github.io/Royal-Carribean-Tracker/preview/<branch-name>`
 
 ```
-push to master (frontend/** changed)  →  npm install  →  npm run build  →  gh-pages branch  →  live site
+push to main   →  npm install  →  npm run build  →  gh-pages (root)     →  live site
+push to other  →  npm install  →  npm run build  →  gh-pages (preview/)  →  preview URL on commit
 ```
-
-The live site is available at: https://J-i-n-g-Yang.github.io/Royal-Carribean-Tracker
 
 > **Note:** The Price Checker tab requires the backend API running locally (`docker compose up`). All other tabs (PDF Generator, Trip Finance OS, Casino Analytics, Casino Year) work fully from the static GitHub Pages deployment.
 
@@ -180,7 +182,7 @@ Run history is persisted to `backend/data/history.json` (mounted as a Docker vol
 These are quality/hardening upgrades worth considering if you outgrow local dev use — none are required for the app to work as-is:
 
 - Serve the frontend as a production build (`npm run build` + a static file server) instead of the CRA dev server; run the backend behind `gunicorn` instead of Flask's dev server.
-- Pin dependency versions in `backend/requirements.txt` (`frontend/package-lock.json` is now committed and used by the deploy workflow for npm caching).
+- Pin `backend/requirements.txt` to exact versions (`==`) once the stack is stable, for fully reproducible builds (`frontend/package-lock.json` is now committed and used by the deploy workflow for npm caching).
 - Add a `.dockerignore` to both services and expand `.gitignore` to cover `backend/data/`, `backend/secrets/`, `__pycache__/`, and `.env`.
 - Run both containers as a non-root user.
 - Add Docker Compose healthchecks wired to the existing `/api/health` endpoint.
