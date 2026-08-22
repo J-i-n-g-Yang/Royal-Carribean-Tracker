@@ -1,16 +1,22 @@
-# Royal Caribbean Dashboard + Price Checker (local Docker setup)
+# Royal Caribbean Dashboard + Price Checker
 
-This combines two projects into one local, Docker-run stack:
+A React dashboard and automated price-checking tool for Royal Caribbean cruises.
 
-- **frontend/** — React dashboard (PDF links, Trip Finance OS, Casino Analytics, Casino Year), plus a **Price Checker** tab
-- **backend/** — a small Flask API that wraps `CheckRoyalCaribbeanPrice.py` (the existing price-checking script, unmodified in its core logic) so the React app can call it over HTTP
+**Live frontend:** [https://J-i-n-g-Yang.github.io/Royal-Carribean-Tracker](https://J-i-n-g-Yang.github.io/Royal-Carribean-Tracker)
+
+- **frontend/** — React dashboard (PDF links, Trip Finance OS, Casino Analytics, Casino Year), plus a **Price Checker** tab — deployed to GitHub Pages via GitHub Actions
+- **backend/** — a small Flask API that wraps `CheckRoyalCaribbeanPrice.py` (the existing price-checking script, unmodified in its core logic) so the React app can call it over HTTP — run locally via Docker
 
 ## Project structure
 
 ```
-Royal-Carribean-Tracker-fixed/
+Royal-Carribean-Tracker/
 ├── docker-compose.yml          # Orchestrates both services
 ├── README.md                   # This file
+├── .github/
+│   └── workflows/
+│       ├── deploy.yml          # Deploys frontend to GitHub Pages on push to master
+│       └── scheduled-check.yml # Runs daily price check via GitHub Actions (no server needed)
 │
 ├── backend/
 │   ├── Dockerfile
@@ -71,6 +77,31 @@ docker compose up --build
 - Backend API: http://localhost:5050 (health check at `/api/health`)
 
 The frontend's "Price Checker" tab calls the backend at `http://localhost:5050` by default (configurable via `REACT_APP_API_URL` in `docker-compose.yml`).
+
+## GitHub Actions workflows
+
+Two automated workflows live in `.github/workflows/`:
+
+### `deploy.yml` — Frontend deployment
+Triggers on every push to `master` that touches `frontend/`, and deploys the React app to GitHub Pages.
+
+```
+push to master (frontend/** changed)  →  npm install  →  npm run build  →  gh-pages branch  →  live site
+```
+
+The live site is available at: https://J-i-n-g-Yang.github.io/Royal-Carribean-Tracker
+
+> **Note:** The Price Checker tab requires the backend API running locally (`docker compose up`). All other tabs (PDF Generator, Trip Finance OS, Casino Analytics, Casino Year) work fully from the static GitHub Pages deployment.
+
+### `scheduled-check.yml` — Daily price check
+Runs the Python price-checker daily at 08:00 UTC without needing any server. Requires two GitHub Actions secrets set in your repo settings:
+
+| Secret | Value |
+|---|---|
+| `RC_ACCOUNTS_JSON` | Your Royal Caribbean account credentials (JSON) |
+| `NOTIFY_URLS` | Comma-separated Apprise URLs for email/Discord/etc. alerts |
+
+Run history is preserved across scheduled runs via `actions/cache` (keyed to `rc-history-`) so the "what changed since last run" diffing keeps working.
 
 ## How the Price Checker tab works
 
@@ -133,8 +164,8 @@ Run history is persisted to `backend/data/history.json` (mounted as a Docker vol
 - Only one check can run at a time (the underlying script uses module-level state), so the backend rejects a second request while one is in progress (`409`).
 - GTY (guarantee, unassigned-room) bookings don't get a category code back from the API before assignment; the code guesses one from the room type letter + brand and logs a warning ("Data is missing from API..."). If the guess is wrong for a specific reservation, override it in `config.yaml` (`categoryOverride`).
 - The price trend chart and "what changed" diff both key off a simplified "latest market price" (a price-drop's new price, or a best-price confirmation's catalog price) rather than every price ever seen — see `_latest_prices_by_reservation()` in `check_runner.py` if you want to change that logic.
-- This is a **local-only development setup** — the backend runs Flask's dev server and the frontend runs the CRA dev server (`npm start`), neither of which is meant for production. See "Possible improvements" below if you want to harden this for anything beyond local use.
-- Nothing is deployed publicly. If you later want this hosted (e.g. via GitHub Pages + a scheduled Action), that's a different setup since GitHub Pages can't run a live backend.
+- The **backend** runs Flask's dev server and is not meant for production — it's local-only. The **frontend** is deployed publicly to GitHub Pages; all tabs except Price Checker work fully without any local setup.
+- The Price Checker tab requires the local backend running (`docker compose up`) since GitHub Pages can't serve a live API.
 - Deliberately not built (see prior discussion): a real production hardening pass (gunicorn/static build/etc.), and support for cruise lines beyond Royal Caribbean/Celebrity.
 
 ## Troubleshooting
@@ -149,7 +180,7 @@ Run history is persisted to `backend/data/history.json` (mounted as a Docker vol
 These are quality/hardening upgrades worth considering if you outgrow local dev use — none are required for the app to work as-is:
 
 - Serve the frontend as a production build (`npm run build` + a static file server) instead of the CRA dev server; run the backend behind `gunicorn` instead of Flask's dev server.
-- Pin dependency versions in `backend/requirements.txt` and commit a `frontend/package-lock.json` so rebuilds are reproducible.
+- Pin dependency versions in `backend/requirements.txt` (`frontend/package-lock.json` is now committed and used by the deploy workflow for npm caching).
 - Add a `.dockerignore` to both services and expand `.gitignore` to cover `backend/data/`, `backend/secrets/`, `__pycache__/`, and `.env`.
 - Run both containers as a non-root user.
 - Add Docker Compose healthchecks wired to the existing `/api/health` endpoint.
