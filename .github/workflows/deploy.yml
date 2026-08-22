@@ -45,7 +45,8 @@ jobs:
         run: npm run build
         env:
           CI: false
-          PUBLIC_URL: /Royal-Carribean-Tracker
+          # homepage in package.json already sets the base path —
+          # no PUBLIC_URL override needed here
 
       - name: Deploy to gh-pages
         uses: peaceiris/actions-gh-pages@v3
@@ -53,6 +54,7 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./frontend/build
           destination_dir: .        # root of gh-pages branch
+          force_orphan: true        # keeps gh-pages branch clean
 
   # ── Build & deploy preview for every other branch ─────────────────────────
   deploy-preview:
@@ -74,7 +76,6 @@ jobs:
 
       - name: Set branch slug
         id: slug
-        # Strips refs/heads/ and replaces / with - so branch names are URL-safe
         run: |
           BRANCH="${GITHUB_REF#refs/heads/}"
           SLUG="${BRANCH//\//-}"
@@ -86,7 +87,6 @@ jobs:
         run: npm run build
         env:
           CI: false
-          # Tells React where assets will be served from
           PUBLIC_URL: /Royal-Carribean-Tracker/preview/${{ steps.slug.outputs.slug }}
 
       - name: Deploy to preview subfolder
@@ -95,7 +95,7 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./frontend/build
           destination_dir: preview/${{ steps.slug.outputs.slug }}
-          keep_files: true          # don't wipe other previews or production
+          keep_files: true
 
       - name: Post preview URL as commit status
         uses: actions/github-script@v7
