@@ -1037,19 +1037,29 @@ def login(account_info: AccountInfo) -> APIAccess:
     )
 
 
-def get_profile(account_info: AccountInfo) -> Tuple[Optional[str], Optional[str], int]:
+def get_profile(account_info: AccountInfo) -> Tuple[Optional[str], Optional[str], int, Dict[str, Any]]:
     """
     Retrieves personal profile properties to extract valid residency codes and loyalty tiers.
 
     Inspects user contact records to locate primary residency states and tracks concurrent
     loyalty modules (Crown & Anchor, Club Royale, Captain's Club, and Blue Chip). Returns
     the active brand tracking index to route downstream web requests correctly.
+
+    The fourth return value is a JSON-serializable snapshot of everything logged below,
+    so callers (the API) can surface tier/points info in the UI instead of only the console.
     """
+    loyalty_info: Dict[str, Any] = {
+        "crown_and_anchor": None,
+        "club_royale": None,
+        "captains_club": None,
+        "blue_chip": None,
+    }
+
     url = f"https://aws-prd.api.rccl.com/en/{account_info.api_brand}/web/v3/guestAccounts/{account_info.access.id}"
     response = _execute_api_request(account_info, "GET", url)
     if response is None:
         log(f"{YELLOW}Could not retrieve profile after retries; continuing without residency/loyalty discounts{RESET}")
-        return None, None, 0
+        return None, None, 0, loyalty_info
     payload = response.json().get("payload") or {}
 
     state = None
@@ -1079,12 +1089,25 @@ def get_profile(account_info: AccountInfo) -> Tuple[Optional[str], Optional[str]
         if total_nights > 0:
             log(f"\tTotal Trips on Royal: {total_trips} - Total Nights: {total_nights}")
 
+        loyalty_info["crown_and_anchor"] = {
+            "number": c_and_a_number,
+            "tier": c_and_a_level,
+            "individual_points": c_and_a_points,
+            "shared_points": c_and_a_shared_points,
+            "total_nights": total_nights,
+            "total_trips": total_trips,
+        }
+
         # Club Royale tier currently is not part of the loyalty payload; use a helper to compute it
         # but keep the payload check in case it ever comes back (key name may need to change)
         casino_points = loyalty.get("clubRoyaleLoyaltyIndividualPoints",0) or 0
         club_royale_loyalty_tier = loyalty.get("clubRoyaleLoyaltyTier") or get_club_royale_tier(casino_points)
         if club_royale_loyalty_tier:
             log(f"\tCasino Royale Tier: {club_royale_loyalty_tier} - {casino_points} Credits")
+            loyalty_info["club_royale"] = {
+                "tier": club_royale_loyalty_tier,
+                "points": casino_points,
+            }
 
     # Get and display Celebrity (Captain's Club and Blue Chip) information
     if captains_club_ID:
@@ -1097,16 +1120,29 @@ def get_profile(account_info: AccountInfo) -> Tuple[Optional[str], Optional[str]
         if total_nights > 0:
             log(f"\tTotal Trips on Celebrity: {total_trips} - Total Nights: {total_nights}")
 
+        loyalty_info["captains_club"] = {
+            "number": captains_club_ID,
+            "tier": cc_level,
+            "individual_points": cc_individual,
+            "shared_points": cc_shared,
+            "total_nights": total_nights,
+            "total_trips": total_trips,
+        }
+
         celebrity_blue_chip_loyalty_tier = loyalty.get("celebrityBlueChipLoyaltyTier","Unknown")
         if celebrity_blue_chip_loyalty_tier != "Unknown":
             celebrity_blue_chip_loyalty_individual_points = loyalty.get("celebrityBlueChipLoyaltyIndividualPoints",0)
             log(f"\tBlue Chip Tier: {celebrity_blue_chip_loyalty_tier} - {celebrity_blue_chip_loyalty_individual_points} Points")
+            loyalty_info["blue_chip"] = {
+                "tier": celebrity_blue_chip_loyalty_tier,
+                "points": celebrity_blue_chip_loyalty_individual_points,
+            }
 
     # Return the correct loyality number based on the account being used
     loyalty_number_to_use = captains_club_ID if account_info.is_celebrity else c_and_a_number
 
     # Return Royal Crown and Anchor shared points to determine if eligible for dp340
-    return state, loyalty_number_to_use, c_and_a_shared_points
+    return state, loyalty_number_to_use, c_and_a_shared_points, loyalty_info
 
 
 def get_checkin_info(account_info: AccountInfo,
@@ -3631,7 +3667,7 @@ def main() -> None:
 
             # Login in to this account and get the profile information
             account_info.access = login(account_info)
-            state_from_profile, loyalty_number, c_and_a_points = get_profile(account_info)
+            state_from_profile, loyalty_number, c_and_a_points, _loyalty_info = get_profile(account_info)
             if account_info.state is None:
                 account_info.state = state_from_profile
 

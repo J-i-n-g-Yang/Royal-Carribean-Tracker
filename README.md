@@ -42,6 +42,11 @@ Royal-Carribean-Tracker-fixed/
         ├── style.css / tailwind.css
         ├── components/
         │   ├── PriceChecker.jsx      # The Price Checker tab (this project's addition)
+        │   ├── LoyaltyCard.jsx       # Loyalty tier dashboard (C&A / Casino Royale / etc.)
+        │   ├── PortfolioSummary.jsx  # Aggregate fare/OBC/savings/next-payment card
+        │   ├── WatchlistForm.jsx     # Watchlist + prospective-cruise entry form
+        │   ├── PriceTrendChart.jsx   # Per-reservation price-over-time chart
+        │   ├── RunDiff.jsx           # "What changed since last run" banner
         │   ├── TripFinanceOS.jsx     # Trip finance dashboard tab
         │   ├── CasinoAnalytics.jsx   # Casino analytics tab
         │   ├── CasinoYearTracker.jsx # Casino year-over-year tracker tab
@@ -50,10 +55,11 @@ Royal-Carribean-Tracker-fixed/
         ├── data/
         │   └── constants.js
         └── utils/
-            └── helpers.js      # localStorage/session helpers, formatting, etc.
+            ├── helpers.js      # localStorage/session helpers, formatting, etc.
+            └── exportRun.js    # CSV export + print-to-PDF for a check run
 ```
 
-**Not committed to version control** (see "Notes" below for what should be in `.gitignore`): `backend/data/history.json` (your personal run history), `backend/secrets/accounts.json` (your credentials, if using the scheduler), and the usual `node_modules/`, `__pycache__/`, `.env`.
+**Not committed to version control** (see `.gitignore`): `backend/secrets/accounts.json` and `backend/secrets/notify.json` (your credentials, if using the scheduler / email notifications), `backend/data/history.json` (your personal run history), and the usual `node_modules/`, `__pycache__/`, `.env`.
 
 ## Run it
 
@@ -72,7 +78,36 @@ The frontend's "Price Checker" tab calls the backend at `http://localhost:5050` 
 2. On "Run Price Check", the React app POSTs to `backend:5000/api/check`.
 3. The backend calls the same `login`, `get_profile`, and `get_voyages` functions from `CheckRoyalCaribbeanPrice.py` that the CLI tool uses — nothing about the core price-checking logic was rewritten.
 4. It captures the script's log output and its structured check-in/balance-due summary table, parses that log into per-reservation cards (price drops, best-price confirmations, add-on rebooks, onboard credit), and returns it all as JSON.
-5. The UI renders a savings summary banner, a Check-in & Balance Summary table, per-reservation cards (expandable for details), watchlist hits, and a collapsible raw log as a fallback.
+5. The UI renders a savings summary banner, what-changed-since-last-run diffs, a portfolio-wide summary, loyalty tier status, a price trend chart, a Check-in & Balance Summary table, per-reservation cards (expandable for details), watchlist hits, and a collapsible raw log as a fallback.
+
+## Features
+
+- **Price drops & best-price confirmations** — per reservation, with actionable "rebook now" cards.
+- **Loyalty dashboard** — Crown & Anchor, Club Royale, Captain's Club, and Blue Chip tier/points, per account, on every run.
+- **Watchlist & prospective cruises** — track a specific add-on/category on an existing booking, or an unbooked cruise-planner URL, against a target price. Fully wired up in the UI (`WatchlistForm.jsx`) — this data already flowed through the backend, it just had no form before.
+- **"What changed since last run"** — the backend diffs this run's per-reservation price against the most recent previous run and returns only what actually moved (`check_runner._diff_against_previous_run`).
+- **Price trend chart** — pick a reservation and see its price across your last 30 runs (`PriceTrendChart.jsx`, built entirely from `/api/history` — no backend changes needed for this one).
+- **Portfolio summary** — total fare paid, total onboard credit, total potential savings on the table, and your next upcoming final payment, aggregated across every reservation in the run.
+- **Email / notification bot** — see "Notifications" below.
+- **Export** — download a run as CSV, or use "Print / Save as PDF" (browser-native, no extra dependency).
+
+## Notifications ("email bot")
+
+The engine already calls `config.apobj.notify(...)` at every meaningful price-alert point (cabin price drops, add-on price drops, "room no longer available") — it just needed an [Apprise](https://github.com/caronc/apprise) object wired up from the API side, which `check_runner.py` now does.
+
+**To enable email alerts persistently:**
+
+1. Copy `backend/secrets/notify.example.json` to `backend/secrets/notify.json`.
+2. Add one or more [Apprise URLs](https://github.com/caronc/apprise#popular-notification-services). For Gmail specifically:
+   - Turn on 2-Step Verification on the sending Google account, then generate an [App Password](https://myaccount.google.com/apppasswords).
+   - Use: `mailto://your_email%40gmail.com:your_app_password@gmail.com?to=you@example.com` (note the `@` in the email is URL-encoded as `%40`).
+3. Rebuild/restart the backend. Every run (manual or scheduled) will now email you automatically whenever a price drop is found.
+
+Apprise also supports Discord, Telegram, Slack, SMS gateways, and dozens more — any Apprise URL works, not just email; see their docs for the full list.
+
+**To test a URL without touching the secrets file:** paste an Apprise URL into the "Optional: Apprise notify URL" field in the Price Checker tab before running a check — it's used for that single run only and never saved.
+
+Alternatively, set the `NOTIFY_URLS` env var (comma-separated Apprise URLs) in `docker-compose.yml` if you'd rather not use a secrets file.
 
 ## Backend API reference
 
@@ -95,11 +130,12 @@ Run history is persisted to `backend/data/history.json` (mounted as a Docker vol
 
 ## Notes / current limitations
 
-- Only account-based checks (login + your existing bookings) are wired up in the UI right now — watchlist items and prospective-cruise URL tracking aren't yet exposed in the form, though the backend endpoint already accepts them (`watch_list`, `prospective_cruises` fields) if you want to extend it.
 - Only one check can run at a time (the underlying script uses module-level state), so the backend rejects a second request while one is in progress (`409`).
 - GTY (guarantee, unassigned-room) bookings don't get a category code back from the API before assignment; the code guesses one from the room type letter + brand and logs a warning ("Data is missing from API..."). If the guess is wrong for a specific reservation, override it in `config.yaml` (`categoryOverride`).
+- The price trend chart and "what changed" diff both key off a simplified "latest market price" (a price-drop's new price, or a best-price confirmation's catalog price) rather than every price ever seen — see `_latest_prices_by_reservation()` in `check_runner.py` if you want to change that logic.
 - This is a **local-only development setup** — the backend runs Flask's dev server and the frontend runs the CRA dev server (`npm start`), neither of which is meant for production. See "Possible improvements" below if you want to harden this for anything beyond local use.
 - Nothing is deployed publicly. If you later want this hosted (e.g. via GitHub Pages + a scheduled Action), that's a different setup since GitHub Pages can't run a live backend.
+- Deliberately not built (see prior discussion): a real production hardening pass (gunicorn/static build/etc.), and support for cruise lines beyond Royal Caribbean/Celebrity.
 
 ## Troubleshooting
 

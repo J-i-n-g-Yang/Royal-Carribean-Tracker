@@ -24,6 +24,7 @@ npm-debug.log*
 
 # ── OS / editor cruft ─────────────────────────────────────────────────────────
 .DS_Store
+**/.DS_Store
 .vscode/
 .idea/
 venv/

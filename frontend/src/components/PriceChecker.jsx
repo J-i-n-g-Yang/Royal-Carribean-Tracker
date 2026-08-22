@@ -2,9 +2,15 @@ import React, { useState } from 'react';
 import {
   Search, Plus, Trash2, Loader2, AlertTriangle, ShieldAlert,
   CheckCircle, TrendingDown, Info, ChevronDown, ChevronUp,
-  DollarSign, Clock, Ship, Gift,
+  DollarSign, Clock, Ship, Gift, Download, Printer, Mail,
 } from 'lucide-react';
 import { storageGet, storageSet } from '../utils/helpers';
+import { downloadRunCSV, printRun } from '../utils/exportRun';
+import LoyaltyCard from './LoyaltyCard';
+import PortfolioSummary from './PortfolioSummary';
+import RunDiff from './RunDiff';
+import PriceTrendChart from './PriceTrendChart';
+import WatchlistForm, { buildWatchlistPayload } from './WatchlistForm';
 
 // Fixed: fallback now correctly matches the docker-compose port (5050)
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5050';
@@ -211,6 +217,15 @@ export default function PriceChecker({ dark }) {
   const [errorMsg, setErrorMsg] = useState(null);
   const [showLog,  setShowLog]  = useState(false);
 
+  // Watchlist / prospective-cruise form state (see WatchlistForm.jsx) —
+  // included in the /api/check payload the backend already accepts.
+  const [watchList,   setWatchList]   = useState([]);
+  const [prospective, setProspective] = useState([]);
+
+  // One-off notification override for testing without touching
+  // backend/secrets/notify.json — see check_runner._resolve_notify_urls().
+  const [notifyUrl, setNotifyUrl] = useState('');
+
   const updateAccount = (idx, field, value) =>
     setAccounts(prev => {
       const next = [...prev];
@@ -238,11 +253,18 @@ export default function PriceChecker({ dark }) {
       return;
     }
 
+    const { watch_list, prospective_cruises } = buildWatchlistPayload(watchList, prospective);
+
     try {
       const res  = await fetch(`${API_URL}/api/check`, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ accounts: validAccounts }),
+        body:    JSON.stringify({
+          accounts: validAccounts,
+          watch_list,
+          prospective_cruises,
+          ...(notifyUrl.trim() ? { notify_urls: [notifyUrl.trim()] } : {}),
+        }),
       });
       const data = await res.json();
       if (!res.ok) setErrorMsg(data.error || 'Check failed.');
@@ -321,6 +343,26 @@ export default function PriceChecker({ dark }) {
         </div>
       </div>
 
+      {/* Watchlist / prospective cruises */}
+      <WatchlistForm
+        watchList={watchList} setWatchList={setWatchList}
+        prospective={prospective} setProspective={setProspective}
+        dark={dark}
+      />
+
+      {/* Notification test override — persistent config lives in
+          backend/secrets/notify.json; this is just a one-off test hook so
+          you don't have to touch that file to try it out. */}
+      <div className={`flex items-center gap-2 p-3 rounded-lg text-xs ${d('bg-gray-50 border border-gray-200 text-gray-600', 'bg-gray-800/50 border border-gray-700 text-gray-400')}`}>
+        <Mail className="w-4 h-4 shrink-0" />
+        <input
+          className={`flex-1 bg-transparent outline-none ${d('text-gray-800 placeholder:text-gray-400', 'text-gray-100 placeholder:text-gray-500')}`}
+          placeholder="Optional: Apprise notify URL to test for this run only, e.g. mailto://user:apppass@gmail.com?to=you@example.com"
+          value={notifyUrl}
+          onChange={e => setNotifyUrl(e.target.value)}
+        />
+      </div>
+
       {/* Error */}
       {errorMsg && (
         <div className={`flex items-start gap-2 p-3 rounded-lg text-sm ${d('bg-red-50 text-red-700', 'bg-red-950 text-red-300')}`}>
@@ -328,12 +370,56 @@ export default function PriceChecker({ dark }) {
         </div>
       )}
 
+      {/* Print stylesheet: only .rc-print-area renders when printing/saving as PDF */}
+      <style>{`
+        @media print {
+          body * { visibility: hidden; }
+          .rc-print-area, .rc-print-area * { visibility: visible; }
+          .rc-print-area { position: absolute; left: 0; top: 0; width: 100%; }
+          .rc-no-print { display: none !important; }
+        }
+      `}</style>
+
       {/* Results */}
       {result && (
-        <div className="space-y-4">
+        <div className="space-y-4 rc-print-area">
+
+          {/* Export actions */}
+          <div className="flex items-center justify-end gap-2 rc-no-print">
+            <button onClick={() => downloadRunCSV(result)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold ${d('bg-gray-100 text-gray-700 hover:bg-gray-200', 'bg-gray-800 text-gray-200 hover:bg-gray-700')}`}>
+              <Download className="w-3.5 h-3.5" /> Export CSV
+            </button>
+            <button onClick={printRun}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold ${d('bg-gray-100 text-gray-700 hover:bg-gray-200', 'bg-gray-800 text-gray-200 hover:bg-gray-700')}`}>
+              <Printer className="w-3.5 h-3.5" /> Print / Save as PDF
+            </button>
+          </div>
+
+          {/* Notification status */}
+          {result.notifications_enabled !== undefined && (
+            <div className={`flex items-center gap-2 text-xs rc-no-print ${d('text-gray-500', 'text-gray-400')}`}>
+              <Mail className="w-3.5 h-3.5" />
+              {result.notifications_enabled
+                ? 'Notifications are configured — you\'ll be alerted via Apprise for any price drops found.'
+                : 'Notifications not configured (see backend/secrets/notify.json or the field above).'}
+            </div>
+          )}
 
           {/* Summary banner */}
           <SummaryBanner summary={result.summary} dark={dark} />
+
+          {/* What changed since last run */}
+          <RunDiff priceDiff={result.price_diff} dark={dark} />
+
+          {/* Portfolio-wide aggregates */}
+          <PortfolioSummary result={result} dark={dark} />
+
+          {/* Loyalty tier status */}
+          <LoyaltyCard accountsLoyalty={result.accounts_loyalty} dark={dark} />
+
+          {/* Price trend chart */}
+          <PriceTrendChart currentReservations={result.findings?.reservations} dark={dark} />
 
           {/* Check-in / payment table */}
           {result.checkin_payment_rows && result.checkin_payment_rows.length > 0 && (
