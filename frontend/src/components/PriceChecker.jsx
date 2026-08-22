@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Search, Plus, Trash2, Loader2, AlertTriangle, ShieldAlert,
   CheckCircle, TrendingDown, Info, ChevronDown, ChevronUp,
-  DollarSign, Clock, Ship, Gift, Download, Printer, Mail,
+  DollarSign, Clock, Ship, Gift, Download, Printer, Mail, Send,
 } from 'lucide-react';
 import { storageGet, storageSet } from '../utils/helpers';
 import { downloadRunCSV, printRun } from '../utils/exportRun';
@@ -225,6 +225,45 @@ export default function PriceChecker({ dark }) {
   // One-off notification override for testing without touching
   // backend/secrets/notify.json — see check_runner._resolve_notify_urls().
   const [notifyUrl, setNotifyUrl] = useState('');
+  const [testingNotify, setTestingNotify] = useState(false);
+  const [notifyTestResult, setNotifyTestResult] = useState(null);
+
+  // Diagnostic snapshot from GET /api/notify/status — surfaces things like a
+  // malformed backend/secrets/notify.json that would otherwise fail silently
+  // (server-side log only, UI just says "not configured").
+  const [notifyStatus, setNotifyStatus] = useState(null);
+
+  const fetchNotifyStatus = async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/notify/status`);
+      setNotifyStatus(await res.json());
+    } catch {
+      setNotifyStatus(null); // backend unreachable — stay silent, /api/check will surface that
+    }
+  };
+
+  useEffect(() => { fetchNotifyStatus(); }, []);
+
+  const sendTestNotification = async () => {
+    setTestingNotify(true);
+    setNotifyTestResult(null);
+    try {
+      const res = await fetch(`${API_URL}/api/notify/test`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(
+          notifyUrl.trim() ? { notify_urls: [notifyUrl.trim()] } : {}
+        ),
+      });
+      const data = await res.json();
+      setNotifyTestResult(data);
+    } catch (err) {
+      setNotifyTestResult({ success: false, error: err.message, results: [] });
+    } finally {
+      setTestingNotify(false);
+      fetchNotifyStatus(); // in case the test round-trip revealed something new
+    }
+  };
 
   const updateAccount = (idx, field, value) =>
     setAccounts(prev => {
@@ -352,15 +391,77 @@ export default function PriceChecker({ dark }) {
 
       {/* Notification test override — persistent config lives in
           backend/secrets/notify.json; this is just a one-off test hook so
-          you don't have to touch that file to try it out. */}
-      <div className={`flex items-center gap-2 p-3 rounded-lg text-xs ${d('bg-gray-50 border border-gray-200 text-gray-600', 'bg-gray-800/50 border border-gray-700 text-gray-400')}`}>
-        <Mail className="w-4 h-4 shrink-0" />
-        <input
-          className={`flex-1 bg-transparent outline-none ${d('text-gray-800 placeholder:text-gray-400', 'text-gray-100 placeholder:text-gray-500')}`}
-          placeholder="Optional: Apprise notify URL to test for this run only, e.g. mailto://user:apppass@gmail.com?to=you@example.com"
-          value={notifyUrl}
-          onChange={e => setNotifyUrl(e.target.value)}
-        />
+          you don't have to touch that file to try it out. Works for any
+          Apprise URL scheme, e.g. mailto:// for email or tgram:// for
+          Telegram (tgram://<bot_token>/<chat_id>). */}
+      <div className={`p-3 rounded-lg text-xs space-y-2 ${d('bg-gray-50 border border-gray-200 text-gray-600', 'bg-gray-800/50 border border-gray-700 text-gray-400')}`}>
+
+        {/* Config diagnostics from GET /api/notify/status — catches things
+            like a malformed notify.json instead of failing silently */}
+        {notifyStatus && (
+          <div className="flex items-start gap-2 pb-1">
+            {notifyStatus.file?.error ? (
+              <>
+                <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5 text-amber-500" />
+                <span className={d('text-amber-700', 'text-amber-400')}>
+                  Problem in backend/secrets/notify.json: {notifyStatus.file.error}
+                  {notifyStatus.active_source === 'env' && ' (currently overridden by NOTIFY_URLS, so this isn\'t blocking anything right now.)'}
+                </span>
+              </>
+            ) : notifyStatus.apprise_installed === false ? (
+              <>
+                <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5 text-amber-500" />
+                <span className={d('text-amber-700', 'text-amber-400')}>
+                  The 'apprise' package isn't installed on the backend — add it to requirements.txt and rebuild.
+                </span>
+              </>
+            ) : notifyStatus.active_source === 'none' ? (
+              <>
+                <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                <span>No persistent notifications configured yet — add a URL to backend/secrets/notify.json, set NOTIFY_URLS, or just test one below.</span>
+              </>
+            ) : (
+              <>
+                <CheckCircle className="w-3.5 h-3.5 shrink-0 mt-0.5 text-green-600" />
+                <span className={d('text-gray-700', 'text-gray-300')}>
+                  {notifyStatus.active_url_count} notification URL{notifyStatus.active_url_count === 1 ? '' : 's'} configured via {notifyStatus.active_source === 'env' ? 'NOTIFY_URLS' : 'notify.json'}: {notifyStatus.active_urls_masked.join(', ')}
+                </span>
+              </>
+            )}
+          </div>
+        )}
+
+        <div className="flex items-center gap-2">
+          <Mail className="w-4 h-4 shrink-0" />
+          <input
+            className={`flex-1 bg-transparent outline-none ${d('text-gray-800 placeholder:text-gray-400', 'text-gray-100 placeholder:text-gray-500')}`}
+            placeholder="Optional: Apprise URL — mailto://user:apppass@gmail.com?to=you@example.com or tgram://<bot_token>/<chat_id>"
+            value={notifyUrl}
+            onChange={e => setNotifyUrl(e.target.value)}
+          />
+          <button
+            type="button"
+            onClick={sendTestNotification}
+            disabled={testingNotify}
+            className={`shrink-0 flex items-center gap-1.5 px-2.5 py-1 rounded-md font-semibold whitespace-nowrap ${d('bg-gray-200 text-gray-700 hover:bg-gray-300', 'bg-gray-700 text-gray-100 hover:bg-gray-600')} disabled:opacity-50`}
+          >
+            {testingNotify ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+            {testingNotify ? 'Sending…' : 'Send Test'}
+          </button>
+        </div>
+
+        {notifyTestResult && (
+          <div className={`pl-6 space-y-1 ${notifyTestResult.success ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+            {notifyTestResult.error && <div>{notifyTestResult.error}</div>}
+            {notifyTestResult.results?.map((r, i) => (
+              <div key={i} className="flex items-center gap-1.5">
+                {r.sent ? <CheckCircle className="w-3.5 h-3.5 shrink-0" /> : <AlertTriangle className="w-3.5 h-3.5 shrink-0" />}
+                <span className={d('text-gray-700', 'text-gray-300')}>{r.url}</span>
+                <span>— {r.sent ? 'delivered' : (r.error || 'failed')}</span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Error */}
@@ -402,7 +503,7 @@ export default function PriceChecker({ dark }) {
               <Mail className="w-3.5 h-3.5" />
               {result.notifications_enabled
                 ? 'Notifications are configured — you\'ll be alerted via Apprise for any price drops found.'
-                : 'Notifications not configured (see backend/secrets/notify.json or the field above).'}
+                : 'Notifications not configured — see the diagnostics above the "Run Price Check" button.'}
             </div>
           )}
 

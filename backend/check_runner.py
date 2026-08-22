@@ -87,6 +87,141 @@ def _build_apprise_object(urls: List[str]) -> Optional["engine.Apprise"]:
     return apobj if added_any else None
 
 
+def _mask_url(url: str) -> str:
+    """
+    Redact the credential/token portion of a notify URL for display back to
+    the user. We only ever want to echo back enough to tell services apart
+    (e.g. "tgram://***" vs "mailto://***"), never the token/password itself.
+    """
+    scheme = url.split("://", 1)[0] if "://" in url else "?"
+    return f"{scheme}://***"
+
+
+def get_notify_status() -> Dict[str, Any]:
+    """
+    Diagnostic snapshot of notification configuration for GET /api/notify/status.
+
+    Today a malformed backend/secrets/notify.json (bad JSON, wrong shape,
+    non-string entries) fails silently — _load_notify_urls_from_file() just
+    logs a warning server-side and returns an empty list, so the UI has no
+    way to explain *why* notifications aren't firing. This surfaces that.
+    """
+    env_urls_raw = os.environ.get("NOTIFY_URLS", "")
+    env_urls = [u.strip() for u in env_urls_raw.split(",") if u.strip()]
+
+    file_exists = os.path.exists(NOTIFY_SECRETS_FILE)
+    file_error: Optional[str] = None
+    file_urls: List[str] = []
+
+    if file_exists:
+        try:
+            with open(NOTIFY_SECRETS_FILE, "r", encoding="utf-8") as f:
+                raw = json.load(f)
+            if isinstance(raw, list):
+                file_urls = [u for u in raw if isinstance(u, str) and u.strip()]
+                bad_entries = [u for u in raw if not (isinstance(u, str) and u.strip())]
+                if bad_entries:
+                    noun = "entry is" if len(bad_entries) == 1 else "entries are"
+                    file_error = (
+                        f"{len(bad_entries)} {noun} not a non-empty string and will be ignored."
+                    )
+            else:
+                file_error = 'notify.json must be a JSON list of URL strings, e.g. ["mailto://..."].'
+        except json.JSONDecodeError as exc:
+            file_error = f"notify.json is not valid JSON: {exc.msg} (line {exc.lineno}, col {exc.colno})."
+        except OSError as exc:
+            file_error = f"Could not read notify.json: {exc}"
+
+    if env_urls:
+        active_source, active_urls = "env", env_urls
+    elif file_urls:
+        active_source, active_urls = "file", file_urls
+    else:
+        active_source, active_urls = "none", []
+
+    return {
+        "apprise_installed":  engine.Apprise is not None,
+        "active_source":      active_source,   # "env" | "file" | "none"
+        "active_url_count":   len(active_urls),
+        "active_urls_masked": [_mask_url(u) for u in active_urls],
+        "file": {
+            "path":      NOTIFY_SECRETS_FILE,
+            "exists":    file_exists,
+            "url_count": len(file_urls),
+            "error":     file_error,
+        },
+        "env": {
+            "configured": bool(env_urls_raw.strip()),
+            "url_count":  len(env_urls),
+        },
+    }
+
+
+def send_test_notification(payload_override: Optional[List[str]]) -> Dict[str, Any]:
+    """
+    Fires an immediate, unconditional test notification to each configured
+    Apprise URL (config file / NOTIFY_URLS / one-off override), independent
+    of any price-check run. Mirrors the engine's own apprise_test CLI flag
+    (see CheckRoyalCaribbeanPrice.main()) but callable from the API so the
+    frontend can offer a "Send Test Notification" button.
+
+    Each URL is tested with its own Apprise() instance so one bad URL
+    (rejected syntax or failed delivery) doesn't block or mask the others —
+    important once you have both an email and a Telegram URL configured.
+    """
+    urls = _resolve_notify_urls(payload_override)
+    if not urls:
+        return {
+            "success": False,
+            "error": "No notification URLs configured. Add one to backend/secrets/notify.json, "
+                     "the NOTIFY_URLS env var, or pass notify_urls in this request.",
+            "results": [],
+        }
+
+    if engine.Apprise is None:
+        return {
+            "success": False,
+            "error": "The 'apprise' package isn't installed — add it to requirements.txt and rebuild.",
+            "results": [],
+        }
+
+    results = []
+    for url in urls:
+        masked = _mask_url(url)
+        single = engine.Apprise()
+        if not single.add(url):
+            results.append({
+                "url": masked,
+                "added": False,
+                "sent": False,
+                "error": "Apprise rejected this URL — check the scheme/syntax.",
+            })
+            continue
+
+        try:
+            sent = single.notify(
+                body="This is only a test. Apprise is set up correctly.",
+                title="Cruise Price Notification Test",
+                body_format=engine.NotifyFormat.TEXT,
+            )
+        except Exception as exc:  # noqa: BLE001
+            results.append({"url": masked, "added": True, "sent": False, "error": str(exc)})
+            continue
+
+        results.append({
+            "url": masked,
+            "added": True,
+            "sent": bool(sent),
+            "error": None if sent else "Notify call returned failure — check credentials/chat id.",
+        })
+
+    return {
+        "success": all(r["sent"] for r in results),
+        "error": None,
+        "results": results,
+    }
+
+
 def _json_safe_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
     engine.checkin_payment_rows stores "final_payment" as a real date object

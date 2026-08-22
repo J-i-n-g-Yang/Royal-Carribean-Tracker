@@ -68,6 +68,32 @@ def check():
     return jsonify(result), status_code
 
 
+# ── Notifications ─────────────────────────────────────────────────────────────
+
+@app.route("/api/notify/status", methods=["GET"])
+def notify_status():
+    """
+    Diagnostic snapshot of notification config — surfaces things like a
+    malformed backend/secrets/notify.json that would otherwise fail silently
+    (server-side log only) with no indication in the UI.
+    """
+    return jsonify(check_runner.get_notify_status())
+
+
+@app.route("/api/notify/test", methods=["POST"])
+def notify_test():
+    """
+    Fires an immediate test notification (independent of any price check) to
+    every configured Apprise URL — config file, NOTIFY_URLS env var, or a
+    one-off notify_urls override in the request body. Useful for confirming
+    a new Telegram/email/Discord URL actually delivers before relying on it.
+    """
+    payload = request.get_json(force=True, silent=True) or {}
+    result = check_runner.send_test_notification(payload.get("notify_urls"))
+    status_code = 200 if result["success"] else 500
+    return jsonify(result), status_code
+
+
 # ── Run history ───────────────────────────────────────────────────────────────
 
 @app.route("/api/history", methods=["GET"])
