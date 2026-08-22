@@ -1,0 +1,49 @@
+name: Scheduled Cruise Price Check
+
+# Runs once daily with no server needed anywhere — GitHub's own runners
+# execute check_runner.run_check() directly via scheduled_run.py, the same
+# function the Flask API and manual UI checks use.
+#
+# NOTE (public repo): GitHub Actions run logs are visible to anyone on a
+# public repo. scheduled_run.py masks account credentials and suppresses the
+# engine's verbose console output specifically because of this — see the
+# comments at the top of that file before changing how it's invoked.
+on:
+  schedule:
+    # 08:00 UTC daily. GitHub Actions cron is best-effort — actual start time
+    # can drift by anywhere from a few minutes to (rarely) longer under load.
+    - cron: '0 8 * * *'
+  workflow_dispatch: {}   # lets you trigger a run manually from the Actions tab to test this
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Restore run history
+        # backend/data/history.json is .gitignored (see .gitignore) since it's
+        # personal run data, not source — so on a public repo it must never be
+        # committed. actions/cache keeps it available across scheduled runs
+        # (so "what changed since last run" diffing keeps working) without it
+        # ever touching the repository itself.
+        uses: actions/cache@v4
+        with:
+          path: backend/data
+          key: rc-history-${{ github.run_id }}
+          restore-keys: |
+            rc-history-
+
+      - name: Install backend dependencies
+        run: pip install -r backend/requirements.txt
+
+      - name: Run scheduled price check
+        working-directory: backend
+        env:
+          RC_ACCOUNTS_JSON: ${{ secrets.RC_ACCOUNTS_JSON }}
+          NOTIFY_URLS: ${{ secrets.NOTIFY_URLS }}
+        run: python scheduled_run.py
