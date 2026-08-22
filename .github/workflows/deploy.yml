@@ -12,9 +12,10 @@ name: Deploy Frontend to GitHub Pages
 on:
   push:
     branches:
-      - master
+      - main
     paths:
-      - 'frontend/**'          # only re-deploy when frontend files change
+      - 'frontend/**'                            # frontend code changes
+      - '.github/workflows/deploy.yml'           # or the workflow itself changes
   workflow_dispatch: {}        # allows manual trigger from the Actions tab
 
 # Grant the GITHUB_TOKEN the permissions needed to push to gh-pages
