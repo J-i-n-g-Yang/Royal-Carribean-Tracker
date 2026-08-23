@@ -50,8 +50,8 @@ export default function App() {
   ];
 
   return (
-    <div className={`min-h-screen transition-colors duration-300 p-6 ${d('bg-gradient-to-br from-blue-50 to-indigo-100', 'bg-gray-950')}`}>
-      <div className={`max-w-4xl mx-auto rounded-2xl shadow-xl p-8 transition-colors duration-300 ${d('bg-white', 'bg-gray-900')}`}>
+    <div className={`min-h-screen transition-colors duration-300 p-4 lg:p-6 ${d('bg-gradient-to-br from-blue-50 to-indigo-100', 'bg-gray-950')}`}>
+      <div className={`max-w-7xl mx-auto rounded-2xl shadow-xl p-6 lg:p-8 transition-colors duration-300 ${d('bg-white', 'bg-gray-900')}`}>
 
         {/* Header */}
         <div className="flex items-start justify-between mb-5">
@@ -72,10 +72,10 @@ export default function App() {
         </div>
 
         {/* Tab Navigation */}
-        <div className={`flex gap-1 p-1 rounded-xl mb-6 ${d('bg-gray-100', 'bg-gray-800')}`}>
+        <div className={`flex flex-wrap gap-1 p-1 rounded-xl mb-6 ${d('bg-gray-100', 'bg-gray-800')}`}>
           {TABS.map(({ id, label, icon: Icon }) => (
             <button key={id} onClick={() => setActiveTab(id)}
-              className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg text-sm font-semibold transition-all ${
+              className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg text-sm font-semibold transition-all flex-1 min-w-[120px] ${
                 activeTab === id
                   ? d('bg-white text-blue-700 shadow-sm', 'bg-gray-700 text-blue-300')
                   : d('text-gray-500 hover:text-gray-700', 'text-gray-500 hover:text-gray-300')
