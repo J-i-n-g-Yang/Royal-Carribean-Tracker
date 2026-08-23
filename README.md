@@ -217,7 +217,7 @@ Fields:
 |---|---|
 | Name | Human-readable label, e.g. "VOOM Internet - 3 Devices" |
 | Target price | Alert me when it drops below this amount |
-| Prefix / Product | Cruise-planner category/product code from the add-on's URL — leave blank if unsure |
+| Prefix / Product | **Required.** Cruise-planner category/product code from the add-on's URL — e.g. `.../account/cruise-planner/category/<PREFIX>/product/<PRODUCT>?bookingId=...`. If either is left blank, the backend silently skips this watch item every run (`process_watch_list_for_booking` requires both to be non-empty) |
 | Currency | e.g. `SGD` or `USD` |
 | Reservation IDs | Comma-separated list of reservation numbers this applies to |
 
@@ -389,7 +389,7 @@ Set these in your repo → **Settings → Secrets and variables → Actions → 
     {
       "cruise_URL": "https://www.royalcaribbean.com/sgp/en/...",
       "paid_price": 4000.00,
-      "loyalty_number": 389324606
+      "loyalty_number": 123456789
     }
   ]
 }
@@ -488,6 +488,7 @@ These don't affect app behaviour but are worth cleaning up:
 - **`backend/secrets/accounts.example.json` is missing.** `scheduler.py` and this README both point to it as the schema reference for `accounts.json`, but only `notify.example.json` and a watchlist example currently exist in `backend/secrets/`. Add one using the format under [Scheduled runs](#scheduled-runs).
 - **The watchlist example file is misnamed.** It currently exists as `backend/secrets/watchlist.example copy.json` (with a space, and an extra "copy") instead of `watchlist.example.json`. Since `.gitignore` only allow-lists `backend/secrets/*.example.json`, this file won't be committed under its current name.
 - **`frontend/requirements.txt` looks misplaced.** It contains `flask` and `flask-cors` (backend dependencies) but lives under `frontend/`, which is a Node project — the frontend `Dockerfile` doesn't reference it. It's likely a stray copy of `backend/requirements.txt` and safe to delete.
+- **The Watchlist form's helper text contradicts the backend.** `WatchlistForm.jsx` tells you it's fine to leave `prefix`/`product` blank ("the check will still run for your reservations either way"), but `process_watch_list_for_booking()` in `CheckRoyalCaribbeanPrice.py` skips any watch item where either field is empty (`if not product or not prefix or watch_price <= 0: continue`). Both fields are actually required — see [Watchlist & prospective cruises](#watchlist--prospective-cruises).
 
 ---
 

@@ -92,8 +92,9 @@ export default function WatchlistForm({ watchList, setWatchList, prospective, se
                     value={w.reservations} onChange={e => updateWatch(idx, 'reservations', e.target.value)} />
                 </div>
                 <p className={`text-[11px] ${d('text-gray-400', 'text-gray-500')}`}>
-                  Prefix/product come from the cruise-planner add-on's URL on royalcaribbean.com —
-                  leave blank if you're not sure; the check will still run for your reservations either way.
+                  Prefix/product come from the cruise-planner add-on's URL on royalcaribbean.com, e.g.
+                  .../category/&lt;PREFIX&gt;/product/&lt;PRODUCT&gt;. Both are required — if either is left
+                  blank, this item is skipped every run.
                 </p>
               </div>
             ))}
