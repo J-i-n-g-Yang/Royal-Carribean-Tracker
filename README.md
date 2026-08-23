@@ -483,12 +483,23 @@ Passwords are never written to disk, never logged, and never included in history
 
 ## Known repo issues
 
-These don't affect app behaviour but are worth cleaning up:
+Most of the issues previously tracked here have been fixed. What's left:
 
-- **`backend/secrets/accounts.example.json` is missing.** `scheduler.py` and this README both point to it as the schema reference for `accounts.json`, but only `notify.example.json` and a watchlist example currently exist in `backend/secrets/`. Add one using the format under [Scheduled runs](#scheduled-runs).
-- **The watchlist example file is misnamed.** It currently exists as `backend/secrets/watchlist.example copy.json` (with a space, and an extra "copy") instead of `watchlist.example.json`. Since `.gitignore` only allow-lists `backend/secrets/*.example.json`, this file won't be committed under its current name.
-- **`frontend/requirements.txt` looks misplaced.** It contains `flask` and `flask-cors` (backend dependencies) but lives under `frontend/`, which is a Node project — the frontend `Dockerfile` doesn't reference it. It's likely a stray copy of `backend/requirements.txt` and safe to delete.
-- **The Watchlist form's helper text contradicts the backend.** `WatchlistForm.jsx` tells you it's fine to leave `prefix`/`product` blank ("the check will still run for your reservations either way"), but `process_watch_list_for_booking()` in `CheckRoyalCaribbeanPrice.py` skips any watch item where either field is empty (`if not product or not prefix or watch_price <= 0: continue`). Both fields are actually required — see [Watchlist & prospective cruises](#watchlist--prospective-cruises).
+- **`backend/secrets/accounts.example.json` exists on disk but isn't committed yet.** The file is correctly named and present locally, but `git status` shows it as untracked — it was created after the last commit that touched `backend/secrets/`. Since `.gitignore` allow-lists `backend/secrets/*.example.json`, it's safe to commit. Run:
+  ```bash
+  git add backend/secrets/accounts.example.json
+  git commit -m "docs: add accounts.example.json schema reference"
+  git push
+  ```
+- **`frontend/requirements.txt` still looks misplaced.** It contains `flask` and `flask-cors` (backend dependencies) but lives under `frontend/`, which is a Node project — the frontend `Dockerfile` doesn't reference it. It's likely a stray copy of `backend/requirements.txt` and safe to delete:
+  ```bash
+  git rm frontend/requirements.txt
+  ```
+- **`docker-compose.yml` references a `backend/secrets/README.md` that doesn't exist.** The comment above the `secrets` volume mount says "see `backend/secrets/README.md`" — no such file is in the repo. Either create a short one documenting the three files in that folder, or update the comment to point at the `backend/secrets/` files table in the [Configuration reference](#configuration-reference) section of this README instead.
+
+Already fixed (kept here as a changelog, not an open item):
+- ~~`watchlist.example.json` was misnamed~~ — it's now correctly named and tracked in git.
+- ~~The Watchlist form's helper text contradicted the backend~~ — `WatchlistForm.jsx` now correctly states that `prefix`/`product` are both required and the item is skipped otherwise, matching `process_watch_list_for_booking()`.
 
 ---
 

@@ -15,16 +15,22 @@ __pycache__/
 *.pyo
 .venv/
 venv/
+.pytest_cache/
+.mypy_cache/
+*.egg-info/
 
 # ── Node / frontend ───────────────────────────────────────────────────────────
 node_modules/
 frontend/build/
 frontend/.env*
 npm-debug.log*
+yarn-error.log*
 
 # ── OS / editor cruft ─────────────────────────────────────────────────────────
 .DS_Store
 **/.DS_Store
+Thumbs.db
 .vscode/
 .idea/
-venv/
+*.swp
+*.swo
