@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
 import { pdfjs } from 'react-pdf';
-import { Anchor, Moon, Sun, FileText, Calculator, TrendingUp, CalendarRange, DollarSign } from 'lucide-react';
+import { Anchor, Moon, Sun, FileText, Calculator, TrendingUp, CalendarRange, DollarSign, History } from 'lucide-react';
 
 import LinkGenerator       from './components/LinkGenerator';
 import TripFinanceOS       from './components/TripFinanceOS';
 import CasinoAnalytics     from './components/CasinoAnalytics';
 import CasinoYearTracker   from './components/CasinoYearTracker';
 import PriceChecker        from './components/PriceChecker';
+import ScheduledHistory    from './components/ScheduledHistory';
 import PdfPreviewModal     from './components/PdfPreviewModal';
 
 // Set up pdfjs worker
@@ -45,6 +46,7 @@ export default function App() {
     { id: 'analytics',  label: 'Casino Analytics',  icon: TrendingUp     },
     { id: 'casinoyear', label: 'Casino Year',        icon: CalendarRange  },
     { id: 'pricecheck', label: 'Price Checker',      icon: DollarSign     },
+    { id: 'history',    label: 'Run History',        icon: History        },
   ];
 
   return (
@@ -89,6 +91,7 @@ export default function App() {
         {activeTab === 'analytics'  && <CasinoAnalytics dark={dark} />}
         {activeTab === 'casinoyear' && <CasinoYearTracker dark={dark} />}
         {activeTab === 'pricecheck' && <PriceChecker dark={dark} />}
+        {activeTab === 'history'    && <ScheduledHistory dark={dark} />}
 
         {/* PDF Preview Modal — outside tab so it works from anywhere */}
         <PdfPreviewModal

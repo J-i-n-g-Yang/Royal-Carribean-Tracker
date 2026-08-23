@@ -46,6 +46,54 @@ def _mask(value: str) -> None:
         print(f"::add-mask::{value}")
 
 
+def _load_watchlist() -> dict:
+    """
+    Load watchlist and prospective-cruise config from the RC_WATCHLIST_JSON
+    environment variable.  Returns a dict with "watch_list" and
+    "prospective_cruises" keys (both default to empty lists so the caller can
+    always merge the result directly into the payload).
+
+    Format (same shape the /api/check endpoint already accepts):
+    {
+      "watch_list": [
+        {
+          "name": "VOOM Internet - 3 Devices",
+          "prefix": "...",
+          "product": "...",
+          "price": 25.00,
+          "currency": "USD",
+          "guest_age_string": "adult",
+          "enabled": true,
+          "reservations": ["1234567", "8901234"]
+        }
+      ],
+      "prospective_cruises": [
+        {
+          "cruise_URL": "https://www.royalcaribbean.com/...",
+          "paid_price": 500.00,
+          "loyalty_number": null
+        }
+      ]
+    }
+    """
+    empty = {"watch_list": [], "prospective_cruises": []}
+    raw = os.environ.get("RC_WATCHLIST_JSON", "").strip()
+    if not raw:
+        return empty
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        print(f"RC_WATCHLIST_JSON is not valid JSON — skipping watchlist: {exc}", file=sys.stderr)
+        return empty
+    if not isinstance(data, dict):
+        print("RC_WATCHLIST_JSON must be a JSON object — skipping watchlist.", file=sys.stderr)
+        return empty
+    return {
+        "watch_list":         data.get("watch_list", []),
+        "prospective_cruises": data.get("prospective_cruises", []),
+    }
+
+
 def main() -> int:
     accounts_raw = os.environ.get("RC_ACCOUNTS_JSON", "")
     if not accounts_raw.strip():
@@ -68,7 +116,13 @@ def main() -> int:
             _mask(acct.get("username", ""))
             _mask(acct.get("password", ""))
 
-    payload = {"accounts": accounts}
+    watchlist = _load_watchlist()
+    if watchlist["watch_list"]:
+        print(f"Watchlist: {len(watchlist['watch_list'])} item(s) loaded.")
+    if watchlist["prospective_cruises"]:
+        print(f"Prospective cruises: {len(watchlist['prospective_cruises'])} item(s) loaded.")
+
+    payload = {"accounts": accounts, **watchlist}
 
     # Swallow the engine's own console output (see module docstring) — its
     # log lines are still captured separately inside result["log_lines"] via

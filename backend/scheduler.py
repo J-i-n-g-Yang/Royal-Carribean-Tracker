@@ -36,6 +36,9 @@ logger = logging.getLogger(__name__)
 SECRETS_FILE = os.path.join(
     os.path.dirname(__file__), "secrets", "accounts.json"
 )
+WATCHLIST_FILE = os.path.join(
+    os.path.dirname(__file__), "secrets", "watchlist.json"
+)
 INTERVAL_MINUTES = int(os.environ.get("RC_SCHEDULE_INTERVAL_MINUTES", "0"))
 
 _scheduler = None   # APScheduler BackgroundScheduler instance, or None
@@ -60,6 +63,38 @@ def _load_accounts() -> List[Dict[str, Any]]:
     return []
 
 
+def _load_watchlist() -> Dict[str, Any]:
+    """
+    Read watchlist and prospective-cruise config from secrets/watchlist.json.
+    Returns a dict with "watch_list" and "prospective_cruises" keys (both
+    default to empty lists) so it can always be merged directly into the payload.
+
+    The file is optional — if missing, the scheduler simply runs without a
+    watchlist, which is the same behaviour as before this feature existed.
+
+    watchlist.json format (same shape as the /api/check payload):
+    {
+      "watch_list": [ { "name": "...", "price": 25.0, ... } ],
+      "prospective_cruises": [ { "cruise_URL": "...", "paid_price": 500.0 } ]
+    }
+    """
+    empty: Dict[str, Any] = {"watch_list": [], "prospective_cruises": []}
+    try:
+        with open(WATCHLIST_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            return {
+                "watch_list":          data.get("watch_list", []),
+                "prospective_cruises": data.get("prospective_cruises", []),
+            }
+        logger.warning("scheduler: %s is not a JSON object — skipping watchlist", WATCHLIST_FILE)
+    except FileNotFoundError:
+        pass   # normal — watchlist is opt-in
+    except json.JSONDecodeError as exc:
+        logger.error("scheduler: could not parse %s — %s", WATCHLIST_FILE, exc)
+    return empty
+
+
 def _scheduled_job() -> None:
     """
     The function APScheduler calls on each tick.
@@ -75,11 +110,14 @@ def _scheduled_job() -> None:
         logger.info("scheduler: no accounts configured — skipping run")
         return
 
+    watchlist = _load_watchlist()
     logger.info(
-        "scheduler: starting automatic check for %d account(s)",
+        "scheduler: starting automatic check for %d account(s), %d watch item(s), %d prospective cruise(s)",
         len(accounts),
+        len(watchlist["watch_list"]),
+        len(watchlist["prospective_cruises"]),
     )
-    payload: Dict[str, Any] = {"accounts": accounts}
+    payload: Dict[str, Any] = {"accounts": accounts, **watchlist}
     try:
         result = check_runner.run_check(payload)
         summary = result.get("summary") or {}

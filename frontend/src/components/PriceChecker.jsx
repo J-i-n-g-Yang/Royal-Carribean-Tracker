@@ -219,8 +219,10 @@ export default function PriceChecker({ dark }) {
 
   // Watchlist / prospective-cruise form state (see WatchlistForm.jsx) —
   // included in the /api/check payload the backend already accepts.
-  const [watchList,   setWatchList]   = useState([]);
-  const [prospective, setProspective] = useState([]);
+  // Persisted to localStorage so they survive page refreshes (passwords are
+  // never part of these objects so there is nothing sensitive to worry about).
+  const [watchList,   setWatchList]   = useState(() => storageGet('rc_watch_list', []));
+  const [prospective, setProspective] = useState(() => storageGet('rc_prospective', []));
 
   // One-off notification override for testing without touching
   // backend/secrets/notify.json — see check_runner._resolve_notify_urls().
@@ -298,12 +300,18 @@ export default function PriceChecker({ dark }) {
   const persistAccounts = () =>
     storageSet('rc_price_accounts', accounts.map(({ password, ...rest }) => rest));
 
+  const persistWatchlist = () => {
+    storageSet('rc_watch_list', watchList);
+    storageSet('rc_prospective', prospective);
+  };
+
   const runCheck = async () => {
     setLoading(true);
     setErrorMsg(null);
     setResult(null);
     setShowLog(false);
     persistAccounts();
+    persistWatchlist();
 
     const validAccounts = accounts.filter(a => a.username && a.password);
     if (validAccounts.length === 0) {

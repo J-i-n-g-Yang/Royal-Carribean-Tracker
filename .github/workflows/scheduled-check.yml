@@ -46,4 +46,10 @@ jobs:
         env:
           RC_ACCOUNTS_JSON: ${{ secrets.RC_ACCOUNTS_JSON }}
           NOTIFY_URLS: ${{ secrets.NOTIFY_URLS }}
+          # Optional — set this secret to track watchlist items and prospective
+          # cruises on every scheduled run. Copy the contents of
+          # backend/secrets/watchlist.example.json, fill in your values, and
+          # paste the whole JSON object as the RC_WATCHLIST_JSON secret in
+          # your repo Settings → Secrets and variables → Actions.
+          RC_WATCHLIST_JSON: ${{ secrets.RC_WATCHLIST_JSON }}
         run: python scheduled_run.py
