@@ -1,5 +1,5 @@
 import React from 'react';
-import { Wallet, Gift, TrendingDown, CalendarClock } from 'lucide-react';
+import { Wallet, Gift, TrendingDown, CalendarClock, Trophy } from 'lucide-react';
 
 /**
  * Rolls up everything already returned per-reservation into a single
@@ -15,6 +15,7 @@ export default function PortfolioSummary({ result, dark }) {
   const reservations = result?.findings?.reservations || [];
   const rows = result?.checkin_payment_rows || [];
   const summary = result?.summary;
+  const bestEver = result?.best_price_ever || {};
 
   if (reservations.length === 0 && rows.length === 0) return null;
 
@@ -30,6 +31,20 @@ export default function PortfolioSummary({ result, dark }) {
     .filter(r => r.balance_due === true && r.final_payment)
     .sort((a, b) => (a.final_payment || '').localeCompare(b.final_payment || ''));
   const nextPayment = owed[0];
+
+  // How many watched reservations are currently sitting at the lowest price
+  // ever recorded for them (best_price_ever is a fresh full re-scan of
+  // history.json each run — see _best_price_ever_by_reservation()).
+  const bestEverEntries = Object.entries(bestEver);
+  const atBestPriceCount = bestEverEntries.filter(([resId, best]) => {
+    const current = reservations.find(r => r.reservation_id === resId);
+    const currentPrice = current?.cabin_findings?.find(
+      f => f.status === 'price_drop' || f.status === 'price_drop_locked'
+    )?.new_price ?? current?.cabin_findings?.find(
+      f => f.status === 'confirmed_best_price'
+    )?.current_catalog_price;
+    return currentPrice != null && best.price != null && currentPrice <= best.price;
+  }).length;
 
   const cards = [
     {
@@ -54,6 +69,11 @@ export default function PortfolioSummary({ result, dark }) {
         : 'All reservations paid',
       accent: nextPayment ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400',
       small: true,
+    },
+    {
+      icon: Trophy, label: 'Reservations at their best-ever price',
+      value: bestEverEntries.length > 0 ? `${atBestPriceCount} of ${bestEverEntries.length}` : '—',
+      accent: 'text-purple-600 dark:text-purple-400',
     },
   ];
 

@@ -844,6 +844,61 @@ def get_club_royale_tier(points: int) -> str | None:
         return "MASTERS"
 
 
+# Loyalty tier thresholds (points required to REACH each tier), lowest-to-highest.
+# Sourced from each brand's publicly documented loyalty program rules — not
+# returned by the API itself, so these need manual updates if a program
+# changes its tiers. Crown & Anchor, Club Royale, and Captain's Club tiers are
+# well-documented and stable; Blue Chip Club's exact cutoffs aren't officially
+# published anywhere (widely reported as approximate) and it resets annually
+# (Aug 1 - Jul 31), so treat its numbers here as a rough estimate only.
+LOYALTY_TIER_THRESHOLDS: Dict[str, List[Tuple[str, int]]] = {
+    "crown_and_anchor": [
+        ("GOLD", 3), ("PLATINUM", 30), ("EMERALD", 55),
+        ("DIAMOND", 80), ("DIAMOND PLUS", 175), ("PINNACLE CLUB", 700),
+    ],
+    "club_royale": [
+        ("CHOICE", 0), ("PRIME", 2500), ("ICON", 25000), ("MASTERS", 100000),
+    ],
+    "captains_club": [
+        ("CLASSIC", 2), ("SELECT", 150), ("ELITE", 300),
+        ("ELITE PLUS", 750), ("ZENITH", 3000),
+    ],
+    "blue_chip": [
+        # Approximate only — see docstring note above.
+        ("PEARL", 0), ("ONYX", 2500), ("AMETHYST", 5000),
+        ("SAPPHIRE", 10000), ("SAPPHIRE PLUS", 25000), ("RUBY", 50000),
+    ],
+}
+
+
+def get_next_tier_info(program: str, points: Optional[int]) -> Optional[Dict[str, Any]]:
+    """
+    Given a loyalty program key (matching LOYALTY_TIER_THRESHOLDS) and the
+    member's current points, returns:
+        {"next_tier": str, "points_needed": int, "at_top_tier": bool}
+    or None if the program is unknown or points is falsy/None.
+
+    "points_needed" is 0 (not negative) when already past every tier, and
+    at_top_tier is True in that case with next_tier set to the top tier name.
+    """
+    thresholds = LOYALTY_TIER_THRESHOLDS.get(program)
+    if not thresholds or points is None:
+        return None
+    points = int(points)
+
+    for tier_name, tier_min in thresholds:
+        if points < tier_min:
+            return {
+                "next_tier": tier_name,
+                "points_needed": tier_min - points,
+                "at_top_tier": False,
+            }
+
+    # Already at or past the highest documented tier
+    top_tier_name = thresholds[-1][0]
+    return {"next_tier": top_tier_name, "points_needed": 0, "at_top_tier": True}
+
+
 #####################################
 # Criuse Domain and Pricing Functions
 #####################################
@@ -1096,6 +1151,7 @@ def get_profile(account_info: AccountInfo) -> Tuple[Optional[str], Optional[str]
             "shared_points": c_and_a_shared_points,
             "total_nights": total_nights,
             "total_trips": total_trips,
+            "next_tier": get_next_tier_info("crown_and_anchor", c_and_a_shared_points),
         }
 
         # Club Royale tier currently is not part of the loyalty payload; use a helper to compute it
@@ -1107,6 +1163,7 @@ def get_profile(account_info: AccountInfo) -> Tuple[Optional[str], Optional[str]
             loyalty_info["club_royale"] = {
                 "tier": club_royale_loyalty_tier,
                 "points": casino_points,
+                "next_tier": get_next_tier_info("club_royale", casino_points),
             }
 
     # Get and display Celebrity (Captain's Club and Blue Chip) information
@@ -1127,6 +1184,7 @@ def get_profile(account_info: AccountInfo) -> Tuple[Optional[str], Optional[str]
             "shared_points": cc_shared,
             "total_nights": total_nights,
             "total_trips": total_trips,
+            "next_tier": get_next_tier_info("captains_club", cc_shared),
         }
 
         celebrity_blue_chip_loyalty_tier = loyalty.get("celebrityBlueChipLoyaltyTier","Unknown")
@@ -1136,6 +1194,7 @@ def get_profile(account_info: AccountInfo) -> Tuple[Optional[str], Optional[str]
             loyalty_info["blue_chip"] = {
                 "tier": celebrity_blue_chip_loyalty_tier,
                 "points": celebrity_blue_chip_loyalty_individual_points,
+                "next_tier": get_next_tier_info("blue_chip", celebrity_blue_chip_loyalty_individual_points),
             }
 
     # Return the correct loyality number based on the account being used
@@ -2074,6 +2133,96 @@ def check_if_room_is_available(params: CruiseURLParams) -> tuple[bool, List[Dict
     # Fall-through state: The loops completed without finding our exact cabin style.
     # The room is sold out, so we return False along with the collected alternative options.
     return False, available_rooms
+
+
+def get_all_cabin_categories(params: CruiseURLParams) -> List[Dict[str, Any]]:
+    """
+    Returns every cabin type/subtype/category currently for sale on a sailing,
+    with its price and rooms-left count — not just the one style being priced.
+
+    This hits the exact same /room-selection/type-and-subtype endpoint as
+    check_if_room_is_available(), but never short-circuits on a match: it
+    always walks every stateroomType/stateroomSubtype in the response. Kept
+    as a separate function (rather than changing check_if_room_is_available)
+    so the existing booked-cabin availability check keeps its early-return
+    fast path and behaviour untouched.
+
+    Returns a list of dicts: {"name", "category_code", "subtype_code",
+    "price", "currency", "rooms_left"}. Returns [] on any request failure —
+    callers should treat that as "couldn't fetch categories", not "sold out".
+    """
+    headers = {
+        'user-agent': USER_AGENT_WEB,
+        'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'accept-language': 'en-US,en;q=0.9',
+        "Accept": "text/x-component",
+        "RSC": "1",
+    }
+
+    request_params = {
+        'packageCode': params.package_code,
+        'sailDate': params.sail_date,
+        'country': params.booking_office_country_code,
+        'selectedCurrencyCode': params.currency_code,
+        'shipCode': params.package_code[0:2] if params.package_code else "",
+        'cabinClassType': 'INTERIOR',  # Endpoint default; response still includes all categories
+        'roomIndex': '0',
+        'r0a': params.number_of_adults,
+        'r0c': params.number_of_children,
+        'r0b': 'n',
+        'r0l': params.loyalty_number if params.loyalty_number else None,
+        'r0r': 'y' if params.police else 'n',
+        'r0s': 'y' if params.fire else 'n',
+        'r0q': 'y' if params.military else 'n',
+        'r0t': 'y' if params.senior else 'n',
+        'r0d': 'INTERIOR',
+        'r0D': 'y',
+        'rgVisited': 'true',
+        'r0C': 'y',
+    }
+
+    api_URL = f'https://www.{params.url_brand}.com/room-selection/type-and-subtype'
+    response = _execute_api_request(
+        method="GET",
+        url=api_URL,
+        params=request_params,
+        headers=headers,
+        timeout=config.request_timeout if config else REQUEST_TIMEOUT,
+        on_failure="skip",
+        use_impersonation=False
+    )
+
+    if response is None:
+        log("Unable to fetch cabin categories from server")
+        return []
+
+    categories: List[Dict[str, Any]] = []
+    rooms = _extract_json_array(response.text, "rooms")
+    if not rooms:
+        return categories
+
+    try:
+        stateroom_types = rooms[0].get("options", {}).get("stateroomTypes", [])
+    except (IndexError, AttributeError):
+        return categories
+
+    for stateroom_type in stateroom_types:
+        type_name = stateroom_type.get("name", "Unknown Type")
+        for stateroom_subtype in stateroom_type.get("stateroomSubtypes", []):
+            pricing_struct = stateroom_subtype.get("pricing", {}) or {}
+            invoice_struct = pricing_struct.get("invoice", {}) or {}
+            price = invoice_struct.get("total")
+            currency = invoice_struct.get("currencyCode") or params.currency_code
+            categories.append({
+                "name": f"{type_name} — {stateroom_subtype.get('name', '')}".strip(" —"),
+                "category_code": stateroom_subtype.get("categoryCode"),
+                "subtype_code": stateroom_subtype.get("code"),
+                "price": price,
+                "currency": currency,
+                "rooms_left": stateroom_subtype.get("roomsLeft"),
+            })
+
+    return categories
 
 
 ####################################

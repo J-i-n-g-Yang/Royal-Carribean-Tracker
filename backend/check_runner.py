@@ -442,6 +442,38 @@ def _diff_against_previous_run(current_findings: Dict[str, Any]) -> List[Dict[st
     return diffs
 
 
+def _best_price_ever_by_reservation(current_findings: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    """
+    Scans every stored historical run (up to MAX_RUNS, currently 50) plus the
+    just-completed run, and returns the lowest market price ever observed per
+    reservation:  {reservation_id: {"price", "currency", "ship", "sail_date",
+    "seen_run_id"}}.
+
+    This is intentionally a full re-scan rather than an incrementally
+    maintained running minimum — history.json already caps at MAX_RUNS, so
+    the scan cost is bounded, and re-deriving it fresh avoids ever having a
+    stale/incorrect "best ever" value silently drift from what's actually in
+    history (e.g. after a manual history edit or a cleared run).
+    """
+    best: Dict[str, Dict[str, Any]] = {}
+
+    def _consider(prices: Dict[str, Dict[str, Any]], run_id: Any) -> None:
+        for res_id, info in prices.items():
+            price = info.get("price")
+            if price is None:
+                continue
+            existing = best.get(res_id)
+            if existing is None or price < existing["price"]:
+                best[res_id] = {**info, "seen_run_id": run_id}
+
+    for past_run in history_store.get_history(limit=history_store.MAX_RUNS):
+        _consider(_latest_prices_by_reservation(past_run.get("findings") or {}), past_run.get("run_id"))
+
+    _consider(_latest_prices_by_reservation(current_findings), None)  # None = this run, not yet saved
+
+    return best
+
+
 # ── Locking ─────────────────────────────────────────────────────────────────────
 # Only one check can run at a time: the underlying script uses module-level
 # globals (config, checkin_payment_rows) that would collide under concurrency.
@@ -535,6 +567,7 @@ def _execute(payload: Dict[str, Any]) -> Dict[str, Any]:
     engine.config = cfg
 
     accounts_loyalty: List[Dict[str, Any]] = []
+    cabin_categories: Dict[str, Any] = {}
 
     error = None
     try:
@@ -599,6 +632,22 @@ def _execute(payload: Dict[str, Any]) -> Dict[str, Any]:
                         automatic_URL=False,
                         paid_price_struct={"paid_price": paid_price},
                     )
+
+                    # All-cabin-categories scan for this watched sailing. Independent
+                    # of get_cruise_price above (which only prices pc's own target
+                    # cabin) — parses the same URL again to build a fresh
+                    # CruiseURLParams and pulls every category currently for sale.
+                    # Best-effort: a failure here never fails the whole run.
+                    try:
+                        cat_params = engine.parse_provided_URL(pc.cruise_URL)
+                        categories = engine.get_all_cabin_categories(cat_params)
+                        if categories:
+                            cabin_categories[pc.cruise_URL] = categories
+                    except Exception:
+                        logger.warning(
+                            "cabin_categories: failed to fetch categories for %s",
+                            pc.cruise_URL, exc_info=True,
+                        )
             finally:
                 anon_session.close()
 
@@ -622,6 +671,10 @@ def _execute(payload: Dict[str, Any]) -> Dict[str, Any]:
         "findings":             findings,
         "summary":              summary,
         "accounts_loyalty":     accounts_loyalty,
+        # All cabin categories/prices/rooms-left for each watched prospective
+        # cruise, keyed by its cruise_URL. Empty {} on watchlist-only-disabled
+        # runs or if every category fetch failed — never breaks the run.
+        "cabin_categories":     cabin_categories,
         "notifications_enabled": cfg.apobj is not None,
     }
 
@@ -645,8 +698,10 @@ def run_check(payload: Dict[str, Any]) -> Dict[str, Any]:
     # since it compares against the most recent run already on disk.
     if result.get("success") and result.get("findings"):
         result["price_diff"] = _diff_against_previous_run(result["findings"])
+        result["best_price_ever"] = _best_price_ever_by_reservation(result["findings"])
     else:
         result["price_diff"] = []
+        result["best_price_ever"] = {}
 
     # Persist to run history (passwords already stripped from result)
     usernames = [a.get("username", "") for a in payload.get("accounts", [])]

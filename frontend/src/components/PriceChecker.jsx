@@ -10,6 +10,8 @@ import LoyaltyCard from './LoyaltyCard';
 import PortfolioSummary from './PortfolioSummary';
 import RunDiff from './RunDiff';
 import PriceTrendChart from './PriceTrendChart';
+import FinalPaymentCountdown from './FinalPaymentCountdown';
+import CabinCategoriesPanel from './CabinCategoriesPanel';
 import WatchlistForm, { buildWatchlistPayload } from './WatchlistForm';
 
 // Fixed: fallback now correctly matches the docker-compose port (5050)
@@ -557,6 +559,13 @@ export default function PriceChecker({ dark }) {
           {/* Portfolio-wide aggregates */}
           <PortfolioSummary result={result} dark={dark} />
 
+          {/* Final payment countdown — built from the same checkin_payment_rows
+              the table below already has, just surfaced as scannable badges */}
+          <FinalPaymentCountdown checkinPaymentRows={result.checkin_payment_rows} dark={dark} />
+
+          {/* All cabin categories for watched prospective cruises */}
+          <CabinCategoriesPanel cabinCategories={result.cabin_categories} prospectiveCruises={prospective} dark={dark} />
+
           {/* Loyalty tier status */}
           <LoyaltyCard accountsLoyalty={result.accounts_loyalty} dark={dark} />
 
@@ -576,13 +585,19 @@ export default function PriceChecker({ dark }) {
                       <th className="text-left px-4 py-2">Sailing</th>
                       <th className="text-left px-4 py-2">Reservation #</th>
                       <th className="text-left px-4 py-2">Check-in Opens</th>
+                      <th className="text-left px-4 py-2">Dining</th>
                       <th className="text-left px-4 py-2">Final Payment</th>
                     </tr>
                   </thead>
                   <tbody>
                     {[...result.checkin_payment_rows]
                       .sort((a, b) => (a.sail_date || '').localeCompare(b.sail_date || ''))
-                      .map((row, i) => (
+                      .map((row, i) => {
+                        // Dining lives on findings.reservations, not on checkin_payment_rows —
+                        // match by reservation_id to pull it in without a second table.
+                        const matchingRes = (result.findings?.reservations || [])
+                          .find(r => r.reservation_id === row.reservation);
+                        return (
                       <tr key={i} className={`border-t align-top ${d('border-gray-100', 'border-gray-800')}`}>
                         <td className="px-4 py-2">
                           <div className={`font-medium ${d('text-gray-800', 'text-gray-100')}`}>{row.name || '—'}</div>
@@ -592,6 +607,7 @@ export default function PriceChecker({ dark }) {
                         </td>
                         <td className="px-4 py-2">{row.reservation || '—'}</td>
                         <td className="px-4 py-2">{row.checkin_label || 'TBD'}</td>
+                        <td className="px-4 py-2">{matchingRes?.dining || '—'}</td>
                         <td className="px-4 py-2">
                           {row.final_payment_display ? (
                             <>
@@ -609,9 +625,13 @@ export default function PriceChecker({ dark }) {
                           ) : '—'}
                         </td>
                       </tr>
-                    ))}
+                        );
+                      })}
                   </tbody>
                 </table>
+              </div>
+              <div className={`px-4 py-2 text-[11px] ${d('bg-gray-50 text-gray-400 border-t border-gray-200', 'bg-gray-800/50 text-gray-500 border-t border-gray-700')}`}>
+                Muster station assignments aren't shown here — Royal Caribbean/Celebrity only release those in-app roughly 24–48h before sailing, not through this API.
               </div>
             </div>
           )}

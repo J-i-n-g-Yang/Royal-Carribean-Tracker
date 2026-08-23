@@ -20,13 +20,14 @@ A personal React dashboard and automated price-checking tool for Royal Caribbean
 8. [Notifications](#notifications)
 9. [Scheduled runs](#scheduled-runs)
 10. [Run History dashboard](#run-history-dashboard)
-11. [GitHub Actions workflows](#github-actions-workflows)
-12. [GitHub Actions secrets](#github-actions-secrets)
-13. [Backend API reference](#backend-api-reference)
-14. [Configuration reference](#configuration-reference)
-15. [Data storage & privacy](#data-storage--privacy)
-16. [Known repo issues](#known-repo-issues)
-17. [Troubleshooting](#troubleshooting)
+11. [New features (added Aug 2026)](#new-features-added-aug-2026)
+12. [GitHub Actions workflows](#github-actions-workflows)
+13. [GitHub Actions secrets](#github-actions-secrets)
+14. [Backend API reference](#backend-api-reference)
+15. [Configuration reference](#configuration-reference)
+16. [Data storage & privacy](#data-storage--privacy)
+17. [Known repo issues](#known-repo-issues)
+18. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -92,24 +93,27 @@ Royal-Carribean-Tracker/
 ├── .github/
 │   └── workflows/
 │       ├── deploy.yml              # Deploys frontend to GitHub Pages
-│       └── scheduled-check.yml     # Daily price check (no server needed)
+│       ├── scheduled-check.yml     # Daily price check (no server needed)
+│       └── weekly-digest.yml       # Weekly summary notification — reads history, no login
 │
 ├── backend/
 │   ├── Dockerfile
 │   ├── requirements.txt
 │   ├── app.py                      # Flask app — routes only
 │   ├── check_runner.py             # Shared run logic (API + scheduler)
+│   ├── digest.py                   # Builds/sends the weekly digest from history.json
+│   ├── digest_run.py               # Entry point for weekly-digest.yml (no login needed)
 │   ├── findings_parser.py          # Parses raw log → structured JSON
 │   ├── history_store.py            # Persists runs to data/history.json
 │   ├── scheduler.py                # Optional APScheduler background checks
 │   ├── scheduled_run.py            # Entry point for GitHub Actions / cron
-│   ├── CheckRoyalCaribbeanPrice.py # Core price-checking engine (unmodified)
+│   ├── CheckRoyalCaribbeanPrice.py # Core price-checking engine
 │   ├── data/
 │   │   └── history.json            # Run history — volume-mounted, gitignored
 │   └── secrets/                    # Volume-mounted read-only, gitignored
-│       ├── accounts.example.json   # ⚠ referenced in docs but missing — see "Known repo issues"
+│       ├── accounts.example.json   # Schema for accounts.json (exists on disk; commit it — see "Known repo issues")
 │       ├── notify.example.json     # Schema for Apprise notification URLs
-│       └── watchlist.example.json  # ⚠ currently misnamed on disk — see "Known repo issues"
+│       └── watchlist.example.json  # Schema for watchlist.json / prospective cruises
 │
 └── frontend/
     ├── Dockerfile
@@ -123,12 +127,15 @@ Royal-Carribean-Tracker/
         ├── style.css / tailwind.css     # Global styles
         ├── components/
         │   ├── PriceChecker.jsx         # Price Checker tab
-        │   ├── LoyaltyCard.jsx          # C&A / Club Royale / Captain's Club / Blue Chip
-        │   ├── PortfolioSummary.jsx     # Aggregate fare / OBC / savings / next payment
+        │   ├── LoyaltyCard.jsx          # C&A / Club Royale / Captain's Club / Blue Chip + next-tier progress
+        │   ├── PortfolioSummary.jsx     # Aggregate fare / OBC / savings / next payment / best-ever-price count
+        │   ├── FinalPaymentCountdown.jsx # Days-until-final-payment badges per reservation
+        │   ├── CabinCategoriesPanel.jsx # All cabin types/prices/rooms-left for watched prospective cruises
+        │   ├── DigestSettings.jsx       # Preview/send the weekly digest on demand
         │   ├── WatchlistForm.jsx        # Watchlist + prospective cruise entry form
         │   ├── PriceTrendChart.jsx      # Per-reservation price-over-time chart
         │   ├── RunDiff.jsx              # "What changed since last run" banner
-        │   ├── ScheduledHistory.jsx     # Run History tab
+        │   ├── ScheduledHistory.jsx     # Run History tab (also hosts DigestSettings)
         │   ├── TripFinanceOS.jsx        # Trip Finance OS tab
         │   ├── CasinoAnalytics.jsx      # Casino Analytics tab
         │   ├── CasinoYearTracker.jsx    # Casino Year tab
@@ -318,6 +325,45 @@ The **Run History** tab shows everything stored in `backend/data/history.json` (
 
 ---
 
+## New features (added Aug 2026)
+
+Five features were added on top of the existing price-check pipeline. All of them reuse data the engine already collects — see each subsection for exactly what's new vs. what's just a new way of displaying existing data.
+
+### Final payment countdown
+`FinalPaymentCountdown.jsx` — badges showing days-until-due for every reservation with an outstanding balance, sorted soonest-first, color-coded (blue → amber ≤14 days → red overdue). Pure frontend: reads the same `checkin_payment_rows` the Check-in & Balance Summary table already renders — no backend changes.
+
+### All cabin categories (watched prospective cruises only)
+`CabinCategoriesPanel.jsx`, backed by a new `get_all_cabin_categories()` function in the engine and a `cabin_categories` field in the API response. Shows every cabin type/category currently for sale — not just your target cabin — with price and rooms-left, for each sailing in your **prospective cruises** watchlist.
+
+**Scope note:** this is intentionally limited to prospective cruises, not existing reservations. The reservation pricing path (`get_cruise_price()`) is complex, security-sensitive code that already works reliably — extending category-scanning into it risked destabilizing your actual booking checks for a "nice to have" feature. Prospective cruises already get a dedicated pricing pass per watchlist entry, so hooking in there was much lower-risk.
+
+### Best price ever
+No new UI tab — folded into `PortfolioSummary.jsx` as a "Reservations at their best-ever price" count, and into `history_store.py`/`check_runner.py` as a new `best_price_ever` field per reservation. Computed by re-scanning all stored history on every run (bounded by the existing 50-run cap), not incrementally tracked — so it can't silently drift from what's actually in `history.json`.
+
+### Points to next tier
+Extends `LoyaltyCard.jsx` with a "N points to [tier]" line per program. Backed by a new `LOYALTY_TIER_THRESHOLDS` table and `get_next_tier_info()` in the engine, using publicly documented tier cutoffs:
+
+| Program | Tiers (points to reach) |
+|---|---|
+| Crown & Anchor | Gold 3 · Platinum 30 · Emerald 55 · Diamond 80 · Diamond Plus 175 · Pinnacle Club 700 |
+| Club Royale | Choice 0 · Prime 2,500 · Icon 25,000 · Masters 100,000 |
+| Captain's Club | Classic 2 · Select 150 · Elite 300 · Elite Plus 750 · Zenith 3,000 |
+| Blue Chip Club | **Approximate only** — Celebrity doesn't officially publish exact cutoffs, and the program resets annually (Aug 1–Jul 31) unlike the other three, which are lifetime totals. The UI flags this next to the Blue Chip card. |
+
+If any brand changes its tier thresholds, update `LOYALTY_TIER_THRESHOLDS` in `CheckRoyalCaribbeanPrice.py` — this table isn't returned by the API itself.
+
+### Digest mode
+`DigestSettings.jsx` (in the Run History tab) + `backend/digest.py` + `.github/workflows/weekly-digest.yml`. Rolls up the last N days of stored runs (default 7) into one summary notification — price hits, total savings, and final payments due within 14 days — sent through the same Apprise/`NOTIFY_URLS` pipeline as your existing alerts, not a separate notification system.
+
+`digest.py` makes **zero calls** to Royal Caribbean/Celebrity — it only reads `history.json` — so it's safe to run on its own schedule independent of the daily check. `weekly-digest.yml` runs every Monday at 08:15 UTC (15 minutes after the daily check's usual slot) and restores the same `actions/cache` the daily check writes to. Trigger one manually anytime with the "Send Now" button in the UI, or via `workflow_dispatch` in the Actions tab.
+
+### Not built: comp tracking and muster station
+Both were requested but aren't feasible as automated features against this API:
+- **Casino comps/offers** aren't exposed anywhere in the booking or loyalty API — they live in a separate marketing/offer system Royal Caribbean doesn't expose to third parties. Automating this would mean guessing at endpoints that don't exist. If you want this, it'd need to be a manual-entry feature (same localStorage pattern as Casino Analytics), not something scraped.
+- **Muster station assignments** genuinely aren't available pre-cruise through any API — they're only released in-app roughly 24–48 hours before sailing. The Check-in & Balance Summary table has a note explaining this instead of a fake/empty column.
+
+---
+
 ## GitHub Actions workflows
 
 ### `deploy.yml` — Frontend deployment
@@ -340,6 +386,17 @@ Steps:
 4. Run `python scheduled_run.py`
 
 The script suppresses the engine's verbose console output (which would include your email address and reservation details) since Actions logs on a public repo are publicly visible. Credentials are masked via `::add-mask::` before any output is produced.
+
+### `weekly-digest.yml` — Weekly summary
+Runs every Monday at 08:15 UTC, or manually via `workflow_dispatch` (with an optional `days` input to override the default 7-day window).
+
+Steps:
+1. Checkout the repo
+2. Restore `backend/data/` from the **same** cache `scheduled-check.yml` writes to (`rc-history-` prefix)
+3. Install Python dependencies
+4. Run `python digest_run.py`
+
+Unlike `scheduled_run.py`, this makes no login calls and needs no `RC_ACCOUNTS_JSON` — it only reads the cached `history.json` and sends through `NOTIFY_URLS`. If it runs before `scheduled-check.yml` has ever populated the cache, it reports zero runs rather than failing.
 
 ---
 
@@ -483,23 +540,12 @@ Passwords are never written to disk, never logged, and never included in history
 
 ## Known repo issues
 
-Most of the issues previously tracked here have been fixed. What's left:
+These don't affect app behaviour but are worth cleaning up:
 
-- **`backend/secrets/accounts.example.json` exists on disk but isn't committed yet.** The file is correctly named and present locally, but `git status` shows it as untracked — it was created after the last commit that touched `backend/secrets/`. Since `.gitignore` allow-lists `backend/secrets/*.example.json`, it's safe to commit. Run:
-  ```bash
-  git add backend/secrets/accounts.example.json
-  git commit -m "docs: add accounts.example.json schema reference"
-  git push
-  ```
-- **`frontend/requirements.txt` still looks misplaced.** It contains `flask` and `flask-cors` (backend dependencies) but lives under `frontend/`, which is a Node project — the frontend `Dockerfile` doesn't reference it. It's likely a stray copy of `backend/requirements.txt` and safe to delete:
-  ```bash
-  git rm frontend/requirements.txt
-  ```
-- **`docker-compose.yml` references a `backend/secrets/README.md` that doesn't exist.** The comment above the `secrets` volume mount says "see `backend/secrets/README.md`" — no such file is in the repo. Either create a short one documenting the three files in that folder, or update the comment to point at the `backend/secrets/` files table in the [Configuration reference](#configuration-reference) section of this README instead.
-
-Already fixed (kept here as a changelog, not an open item):
-- ~~`watchlist.example.json` was misnamed~~ — it's now correctly named and tracked in git.
-- ~~The Watchlist form's helper text contradicted the backend~~ — `WatchlistForm.jsx` now correctly states that `prefix`/`product` are both required and the item is skipped otherwise, matching `process_watch_list_for_booking()`.
+- **`backend/secrets/accounts.example.json` is missing.** `scheduler.py` and this README both point to it as the schema reference for `accounts.json`, but only `notify.example.json` and a watchlist example currently exist in `backend/secrets/`. Add one using the format under [Scheduled runs](#scheduled-runs).
+- **The watchlist example file is misnamed.** It currently exists as `backend/secrets/watchlist.example copy.json` (with a space, and an extra "copy") instead of `watchlist.example.json`. Since `.gitignore` only allow-lists `backend/secrets/*.example.json`, this file won't be committed under its current name.
+- **`frontend/requirements.txt` looks misplaced.** It contains `flask` and `flask-cors` (backend dependencies) but lives under `frontend/`, which is a Node project — the frontend `Dockerfile` doesn't reference it. It's likely a stray copy of `backend/requirements.txt` and safe to delete.
+- **The Watchlist form's helper text contradicts the backend.** `WatchlistForm.jsx` tells you it's fine to leave `prefix`/`product` blank ("the check will still run for your reservations either way"), but `process_watch_list_for_booking()` in `CheckRoyalCaribbeanPrice.py` skips any watch item where either field is empty (`if not product or not prefix or watch_price <= 0: continue`). Both fields are actually required — see [Watchlist & prospective cruises](#watchlist--prospective-cruises).
 
 ---
 

@@ -5,6 +5,7 @@ import {
   Loader2, ArrowDownRight, ArrowUpRight, AlertTriangle,
   Bell, BellOff, Layers,
 } from 'lucide-react';
+import DigestSettings from './DigestSettings';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5050';
 
@@ -439,6 +440,9 @@ export default function ScheduledHistory({ dark }) {
 
       {/* Scheduler banner */}
       <SchedulerBanner status={schedulerStatus} dark={dark} />
+
+      {/* Digest mode — weekly rollup via the same notify pipeline as daily alerts */}
+      <DigestSettings dark={dark} />
 
       {/* Error */}
       {error && (

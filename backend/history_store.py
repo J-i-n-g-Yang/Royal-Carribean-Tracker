@@ -73,6 +73,8 @@ def append_run(result: Dict[str, Any], account_usernames: List[str]) -> Dict[str
         # previous run — both optional/absent on older records
         "accounts_loyalty": result.get("accounts_loyalty", []),
         "price_diff": result.get("price_diff", []),
+        "best_price_ever": result.get("best_price_ever", {}),
+        "cabin_categories": result.get("cabin_categories", {}),
         "notifications_enabled": result.get("notifications_enabled", False),
         # Full log kept so the UI can always fall back to the raw text
         "log_lines": result.get("log_lines", []),

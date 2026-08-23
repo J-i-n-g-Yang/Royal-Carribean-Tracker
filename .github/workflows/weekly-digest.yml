@@ -1,0 +1,53 @@
+name: Weekly Cruise Tracker Digest
+
+# Rolls up the last 7 days of scheduled-check.yml runs into a single summary
+# notification. This workflow does NOT log into Royal Caribbean/Celebrity or
+# make any pricing calls itself — it only reads backend/data/history.json
+# (restored from the same actions/cache the daily check writes to) and sends
+# a summary via digest.py. If this workflow runs before scheduled-check.yml
+# has ever populated the cache, it'll report zero runs — that's expected on
+# a brand new repo, not an error.
+on:
+  schedule:
+    # 08:15 UTC every Monday — 15 minutes after the daily check's usual 08:00
+    # UTC slot, so the week's final run is already in the cache by the time
+    # this reads it.
+    - cron: '15 8 * * 1'
+  workflow_dispatch:
+    inputs:
+      days:
+        description: 'How many days back to summarize'
+        required: false
+        default: '7'
+
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Restore run history
+        # Same cache key prefix as scheduled-check.yml so this reads the same
+        # history.json the daily check has been writing to all week. This
+        # workflow only ever reads it — it doesn't need actions/cache's
+        # write-back behaviour, but restore-keys still finds the latest save.
+        uses: actions/cache@v4
+        with:
+          path: backend/data
+          key: rc-history-${{ github.run_id }}
+          restore-keys: |
+            rc-history-
+
+      - name: Install backend dependencies
+        run: pip install -r backend/requirements.txt
+
+      - name: Send weekly digest
+        working-directory: backend
+        env:
+          NOTIFY_URLS: ${{ secrets.NOTIFY_URLS }}
+          DIGEST_DAYS: ${{ github.event.inputs.days || '7' }}
+        run: python digest_run.py

@@ -14,6 +14,7 @@ from flask import Flask, jsonify, request
 from flask_cors import CORS
 
 import check_runner
+import digest
 import history_store
 import scheduler
 
@@ -115,6 +116,31 @@ def notify_summary():
         record = recent[0]
 
     result = check_runner.send_run_summary(record, payload.get("notify_urls"))
+    status_code = 200 if result["success"] else 500
+    return jsonify(result), status_code
+
+
+@app.route("/api/digest/preview", methods=["GET"])
+def digest_preview():
+    """
+    Builds (but does not send) the digest text for the last N days — lets
+    the UI show what a digest would look like right now before firing it.
+    ?days=N, default 7.
+    """
+    days = int(request.args.get("days", digest.DEFAULT_DIGEST_DAYS))
+    return jsonify(digest.build_digest(days=days))
+
+
+@app.route("/api/digest/send", methods=["POST"])
+def digest_send():
+    """
+    Builds and sends the digest through Apprise right now — same
+    "notify_urls" one-off-override convention as /api/notify/test.
+    Body: {"days": 7, "notify_urls": [...]} — both optional.
+    """
+    payload = request.get_json(force=True, silent=True) or {}
+    days = int(payload.get("days", digest.DEFAULT_DIGEST_DAYS))
+    result = digest.send_digest(days=days, notify_urls_override=payload.get("notify_urls"))
     status_code = 200 if result["success"] else 500
     return jsonify(result), status_code
 
