@@ -143,6 +143,48 @@ def main() -> int:
         f"notifications_enabled={result.get('notifications_enabled')}"
     )
 
+    # Watch-list visibility: hit_count above only counts SAVINGS opportunities
+    # (price_drop / addon_rebook with savings > 0) — it says nothing about
+    # watch items that were checked but found no savings, or that failed to
+    # resolve at all (wrong prefix/product code, reservation ID mismatch,
+    # etc). Those cases produce no structured "finding" — the engine only
+    # logs a plain text line for them, which findings_parser.py has no regex
+    # for, so it lands in that reservation's raw_lines as an "unrecognised
+    # line" instead. Print a redacted summary of exactly that here, since
+    # this is the only place many people will ever look after a scheduled
+    # run — no credentials or personal identifiers appear in any of this
+    # (reservation IDs and package names aren't secrets, and anything that
+    # WAS masked via ::add-mask:: above stays masked in this output too).
+    reservations = (result.get("findings") or {}).get("reservations", [])
+    if watchlist["watch_list"] and reservations:
+        print("\n── Watch-list check outcomes ──")
+        watch_item_names = {w.get("name", "").strip() for w in watchlist["watch_list"] if w.get("name")}
+        for r in reservations:
+            res_id = r.get("reservation_id")
+            addon_findings = r.get("addon_findings", [])
+            if addon_findings:
+                for f in addon_findings:
+                    print(f"  res {res_id}: {f.get('item', f.get('type'))} -> {f.get('type')}"
+                          f"{' (save ' + str(f.get('savings_per_night')) + '/night)' if f.get('savings_per_night') else ''}")
+            else:
+                # No addon_finding at all for this reservation — either no
+                # watch item's reservations list included this booking ID,
+                # or the product/prefix lookup failed silently. Surface any
+                # raw_lines that look watch-list-related so it's not a dead end.
+                relevant_raw = [
+                    line for line in r.get("raw_lines", [])
+                    if "not available for passenger" in line
+                    or any(name and name in line for name in watch_item_names)
+                ]
+                if relevant_raw:
+                    print(f"  res {res_id}: no watch-list match, but found:")
+                    for line in relevant_raw:
+                        print(f"    {line.strip()}")
+                else:
+                    print(f"  res {res_id}: no watch-list items applied to this reservation "
+                          f"(check each item's \"reservations\" list includes \"{res_id}\")")
+        print("── end watch-list outcomes ──\n")
+
     if result.get("error"):
         # Errors can legitimately contain account-specific detail (e.g. a
         # login failure message), so mask is applied above covers usernames,
