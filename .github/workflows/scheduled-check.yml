@@ -10,9 +10,13 @@ name: Scheduled Cruise Price Check
 # comments at the top of that file before changing how it's invoked.
 on:
   schedule:
-    # 08:00 UTC daily. GitHub Actions cron is best-effort — actual start time
-    # can drift by anywhere from a few minutes to (rarely) longer under load.
-    - cron: '0 8 * * *'
+    # 08:17 UTC daily (= 4:17 PM Singapore, UTC+8 with no DST). Deliberately
+    # off the top of the hour: GitHub Actions cron is best-effort, and exact
+    # round times (like :00) are documented as the highest-contention slot
+    # since most repos default to them — an offbeat minute avoids that
+    # pile-up. This does NOT protect against genuine platform incidents
+    # (see the drift check below), only routine load-based queueing delay.
+    - cron: '17 8 * * *'
   workflow_dispatch: {}   # lets you trigger a run manually from the Actions tab to test this
 
 jobs:
@@ -20,6 +24,28 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Check for schedule drift
+        # Only meaningful for cron-triggered runs — a manual workflow_dispatch
+        # isn't "late" against anything. Flags (via a visible ::warning::
+        # annotation + step summary) when GitHub's schedule event fired more
+        # than 2 hours later than the intended 08:17 UTC target — the usual
+        # sign of a GitHub-side Actions incident/backlog, not a config
+        # problem here. See githubstatus.com for confirmation on any given
+        # day. This never fails or skips the run; it just surfaces the delay.
+        if: github.event_name == 'schedule'
+        run: |
+          TARGET_MINS=$((8 * 60 + 17))
+          NOW_MINS=$(date -u +'%H:%M' | awk -F: '{print $1 * 60 + $2}')
+          DIFF=$((NOW_MINS - TARGET_MINS))
+          if [ "$DIFF" -lt 0 ]; then DIFF=$((DIFF + 1440)); fi
+          echo "Scheduled for 08:17 UTC, actually started $(date -u +'%H:%M') UTC (${DIFF} min drift)"
+          if [ "$DIFF" -gt 120 ]; then
+            echo "::warning::Scheduled run started ${DIFF} minutes late (target 08:17 UTC, actual $(date -u +'%H:%M') UTC). This is usually a GitHub Actions-side delay/incident, not a problem with this repo — check https://www.githubstatus.com for that day."
+            echo "⚠️ **Schedule drift:** started ${DIFF} min late (target 08:17 UTC, actual $(date -u +'%H:%M') UTC). Likely a GitHub-side delay — check [githubstatus.com](https://www.githubstatus.com)." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "✅ Schedule drift: ${DIFF} min (within normal range)" >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - uses: actions/setup-python@v5
         with:
