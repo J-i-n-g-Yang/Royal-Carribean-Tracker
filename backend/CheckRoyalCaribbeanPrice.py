@@ -111,6 +111,10 @@ log_err = None
 # compact check-in + final-payment summary table (see print_checkin_payment_table)
 checkin_payment_rows: List[Dict[str, Any]] = []
 
+# Add-on watch-item price checks collected during a run, optionally dumped to
+# JSON at the end via write_watch_price_json() (see CruiseAppConfig.output_watch_as_json)
+watch_price_rows: List[Dict[str, Any]] = []
+
 ##################################
 # Classes (Structural and Logging)
 ##################################
@@ -504,6 +508,8 @@ class CruiseAppConfig:
     notify_on_error: bool = False
     apprise_test: Optional[bool] = None
     currency_override: Optional[str] = None
+    output_watch_as_json: bool = False
+    output_json_watch_file: Optional[str] = "output-json-watch.txt"
 
     display_cruise_prices: bool = True
     minimum_saving_alert: Optional[float] = None
@@ -2303,6 +2309,11 @@ def get_new_order_price(
     if "Bottles" in variant:
         title = f"{title} ({variant})"
 
+    booking_eligibility = payload.get("bookingEligibility") or {}
+    if booking_eligibility.get("reason") == "NO_STARTING_FROM_PRICE":
+        log(YELLOW + f"\t{title}: Server returned no pricing data (currency mismatch or unavailable for reservation)." + RESET)
+        return
+
     per_day_price = sales_unit in ['PER_NIGHT', 'PER_DAY']
     new_price_payload = payload.get("startingFromPrice")
 
@@ -2330,6 +2341,15 @@ def get_new_order_price(
         # already guarded for cruise fares)
         log(YELLOW + f"\t{title}: no current price returned; cannot compare" + RESET)
         return
+
+    watch_price_rows.append({
+        "SailDate": start_date,
+        "ReservationID": reservation_ID,
+        "Passenger": passenger_name,
+        "ProductID": product,
+        "ProductTitle": title,
+        "CurrentPrice": current_price,
+    })
 
     # Process Deal Alerts
     if current_price < paid_price:
@@ -2385,7 +2405,8 @@ def get_new_order_price(
     else:
         # Current price on server is higher than the paid price ("currently best price" path)
         if for_watch:
-            temp_string = GREEN + f"[WATCH] {display_name} (Cabin {room}) {title} price is higher than watch price: {paid_price:.2f} {currency}" + RESET
+            comp_string = "the same as" if current_price == paid_price else "higher than"
+            temp_string = GREEN + f"[WATCH] {display_name} (Cabin {room}) {title} price is {comp_string} watch price: {paid_price:.2f} {currency}" + RESET
         else:
             temp_string = GREEN + f"{display_name} (Cabin {room}) has best price "
             if per_day_price:
@@ -2404,6 +2425,20 @@ def get_new_order_price(
         if current_price > paid_price:
             temp_string += f" (now {current_price:.2f} {currency})"
         log(temp_string)
+
+
+def write_watch_price_json(output_path: str) -> None:
+    """Write the add-on watch prices collected during this run as a JSON array."""
+    if platform.system() == "iOS":
+        output_path = os.path.expanduser('~/Documents') + "/" + output_path
+
+    try:
+        with open(output_path, "w", encoding="utf-8") as output_file:
+            json.dump(watch_price_rows, output_file, indent=2)
+            output_file.write("\n")
+        log(f"\n{BLUE}Writing watchlist JSON to {output_path}" + RESET)
+    except OSError as error:
+        log(f"{YELLOW}Warning: Could not write JSON watch output '{output_path}': {error}{RESET}")
 
 
 def process_watch_list_for_booking(
@@ -3558,6 +3593,11 @@ def load_config_objects(config_path: str) -> CruiseAppConfig:
         for c in data.get("cruises", [])
     ]
 
+    # Due to RCCL API updates, per-item/config currency overrides no longer change
+    # what the server returns - these flags just drive the deprecation warning below
+    currency_override_present = data.get("currencyOverride", None) is not None
+    currency_present = any("currency" in w for w in data.get("watchList", []))
+
     # Parse watch list
     watch_list = []
     for w in data.get("watchList", []):
@@ -3606,6 +3646,8 @@ def load_config_objects(config_path: str) -> CruiseAppConfig:
         request_timeout=int(data.get("requestTimeout", REQUEST_TIMEOUT)),
         date_display_format=data.get("dateDisplayFormat", "%x"),
         log_file=data.get("logFile"),
+        output_watch_as_json=data.get("outputWatchAsJson", False),
+        output_json_watch_file=data.get("outputJsonFile", "output-json-watch.txt"),
         apobj=apobj,
         accounts=accounts,
         watch_list=watch_list,
@@ -3620,6 +3662,11 @@ def load_config_objects(config_path: str) -> CruiseAppConfig:
 
     # Set up the custom logger
     setup_hybrid_logging(config.log_file)
+
+    if currency_override_present:
+        log(YELLOW + "Due to RCCL API updates, config file option 'currencyOverride' is deprecated and no longer affects returned prices" + RESET)
+    if currency_present:
+        log(YELLOW + "Due to RCCL API updates, config file watchlist option 'currency' is deprecated and no longer affects returned prices" + RESET)
 
     return config
 
@@ -3784,6 +3831,7 @@ def main() -> None:
     try:
         # Start each run with an empty check-in / payment summary collector
         checkin_payment_rows.clear()
+        watch_price_rows.clear()
 
         # Set Time with AM/PM or 24h based on locale
         locale.setlocale(locale.LC_TIME,'')
@@ -3804,7 +3852,7 @@ def main() -> None:
             log(YELLOW + f"Only alerting for savings >= {config.minimum_saving_alert:.2f}" + RESET)
 
         if config.currency_override:
-            log(YELLOW + f"Overriding Current Price Currency to {config.currency_override}" + RESET)
+            log(YELLOW + f"Overriding Current Price Currency to {config.currency_override} (note: RCCL API updates mean this override no longer changes returned prices)" + RESET)
 
         # Generate the list of ship codes
         ship_dictionary = ShipRegistry()
@@ -3895,6 +3943,9 @@ def main() -> None:
 
         # Summary table of upcoming check-in and final-payment dates for booked sailings
         print_checkin_payment_table()
+
+        if config.output_watch_as_json:
+            write_watch_price_json(config.output_json_watch_file)
 
     except Exception as e:
         # Let the global catch-all at the module entry point handle unexpected execution faults

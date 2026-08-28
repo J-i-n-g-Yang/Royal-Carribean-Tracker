@@ -548,6 +548,7 @@ def _execute(payload: Dict[str, Any]) -> Dict[str, Any]:
     engine.setup_hybrid_logging(log_file_path=None)
     logging.getLogger().addHandler(handler)
     engine.checkin_payment_rows.clear()
+    engine.watch_price_rows.clear()
 
     cfg = engine.CruiseAppConfig(
         minimum_saving_alert=payload.get("minimum_saving_alert"),
@@ -565,6 +566,20 @@ def _execute(payload: Dict[str, Any]) -> Dict[str, Any]:
     notify_urls = _resolve_notify_urls(payload.get("notify_urls"))
     cfg.apobj = _build_apprise_object(notify_urls)
     engine.config = cfg
+
+    # Due to RCCL API updates, currency overrides no longer change returned prices.
+    # Kept functional for now (see project notes) but surfaced here so it's visible
+    # in the run log rather than silently doing nothing.
+    if cfg.currency_override:
+        engine.log(
+            f"{engine.YELLOW}Note: currency override '{cfg.currency_override}' is set, "
+            f"but RCCL API updates mean it no longer changes returned prices.{engine.RESET}"
+        )
+    elif any(w.currency and w.currency != "USD" for w in cfg.watch_list):
+        engine.log(
+            f"{engine.YELLOW}Note: a watch item currency other than USD is set, "
+            f"but RCCL API updates mean it no longer changes returned prices.{engine.RESET}"
+        )
 
     accounts_loyalty: List[Dict[str, Any]] = []
     cabin_categories: Dict[str, Any] = {}
