@@ -9,10 +9,11 @@ name: Weekly Cruise Tracker Digest
 # a brand new repo, not an error.
 on:
   schedule:
-    # 08:15 UTC every Monday — 15 minutes after the daily check's usual 08:00
-    # UTC slot, so the week's final run is already in the cache by the time
-    # this reads it.
-    - cron: '15 8 * * 1'
+    # 08:32 UTC every Monday — 15 minutes after the daily check's 08:17 UTC
+    # slot (see scheduled-check.yml), so the week's final run is already in
+    # the cache by the time this reads it. If you change scheduled-check.yml's
+    # cron time, update this one to stay ~15 min behind it.
+    - cron: '32 8 * * 1'
   workflow_dispatch:
     inputs:
       days:

@@ -16,6 +16,10 @@ on:
     # since most repos default to them — an offbeat minute avoids that
     # pile-up. This does NOT protect against genuine platform incidents
     # (see the drift check below), only routine load-based queueing delay.
+    #
+    # NOTE: weekly-digest.yml's Monday cron is deliberately set ~15 min after
+    # this one so it reads a cache that already has the day's run in it. If
+    # you change this cron, update weekly-digest.yml's to match.
     - cron: '17 8 * * *'
   workflow_dispatch: {}   # lets you trigger a run manually from the Actions tab to test this
 
